@@ -1,0 +1,2 @@
+# clickrush
+test of click
