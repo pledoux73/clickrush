@@ -212,8 +212,10 @@ def apply_staff_action(con, actor, action, target_id=None, score_id=None, reason
             con.execute('UPDATE users SET is_banned=?,ban_reason=NULL WHERE id=?', (False if con.postgres else 0, target_id))
         return None
     if action == 'delete_score':
-        score = con.execute('SELECT id FROM scores WHERE id=?', (score_id,)).fetchone()
+        score = con.execute('SELECT s.id,u.id AS user_id,u.role FROM scores s JOIN users u ON u.id=s.user_id WHERE s.id=?', (score_id,)).fetchone()
         if not score: return 'Score introuvable.'
+        if score['user_id'] == actor['id']: return 'Tu ne peux pas supprimer tes propres scores.'
+        if protected_from(actor, score): return 'Tu ne peux pas supprimer les scores de ce compte.'
         con.execute('DELETE FROM scores WHERE id=?', (score_id,))
         return None
     return 'Action non autorisée.'
@@ -624,6 +626,10 @@ def admin_action():
                 target=con.execute('SELECT id,role FROM users WHERE id=?',(target_id,)).fetchone()
                 if not target:return jsonify(error='Joueur introuvable.'),404
                 if protected_from(actor,target) or target['id']==actor['id']:return jsonify(error='Action interdite sur ce compte.'),403
+            if action=='delete_score':
+                score=con.execute('SELECT s.id,u.id AS user_id,u.role FROM scores s JOIN users u ON u.id=s.user_id WHERE s.id=?',(score_id,)).fetchone()
+                if not score:return jsonify(error='Score introuvable.'),404
+                if score['user_id']==actor['id'] or protected_from(actor,score):return jsonify(error='Action interdite sur ce score.'),403
             con.execute("""INSERT INTO admin_requests(requester_id,action,target_user_id,score_id,reason,status,created_at)
                 VALUES(?,?,?,?,?,'pending',?)""",(actor['id'],action,target_id,score_id,reason,int(time.time())))
         return jsonify(ok=True,pending_approval=True)
