@@ -765,7 +765,7 @@ def admin_overview():
                 WHERE r.status='pending' ORDER BY r.created_at ASC LIMIT 100""").fetchall()
         else:
             pending = con.execute("""SELECT r.id,r.action,r.target_user_id,r.score_id,r.reason,r.created_at,
-                req.username AS requester,target.username AS target
+                req.username AS requester,req.avatar_data AS requester_avatar,target.username AS target,target.avatar_data AS target_avatar
                 FROM admin_requests r JOIN users req ON req.id=r.requester_id
                 LEFT JOIN users target ON target.id=r.target_user_id
                 WHERE r.status='pending' AND r.requester_id=? ORDER BY r.created_at ASC LIMIT 100""",(actor['id'],)).fetchall()
@@ -777,7 +777,7 @@ def admin_history(target_id):
     actor,error=staff_required()
     if error:return error
     with db() as con:
-        target=con.execute('SELECT id,username,role,is_banned,created_at FROM users WHERE id=?',(target_id,)).fetchone()
+        target=con.execute('SELECT id,username,avatar_data,role,is_banned,created_at FROM users WHERE id=?',(target_id,)).fetchone()
         if not target:return jsonify(error='Joueur introuvable.'),404
         rows=con.execute('SELECT id,clicks,duration,cps,created_at FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 200',(target_id,)).fetchall()
     return jsonify(user=dict(target),history=[dict(r) for r in rows])
