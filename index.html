@@ -162,10 +162,10 @@ function renderAdminScores(){
 }
 function renderAdminRequests(){
  if(!adminSnapshot)return;
- $('adminRequests').innerHTML=adminSnapshot.requests.map(r=>'<div class="social-item"><span class="social-person">'+avatarHtml(r.requester_avatar,r.requester)+'<span><b>'+escapeHtml(r.requester)+'</b> demande '+escapeHtml(r.action)+' '+(r.target||('score #'+r.score_id))+'<br><small class="social-small">'+escapeHtml(r.reason||'Sans motif')+'</small></span></span><span><button onclick="reviewAdminRequest('+r.id+',\'approve\')">Valider</button> <button class="ghost" onclick="reviewAdminRequest('+r.id+',\'reject\')">Refuser</button></span></div>').join('')||'<span class="social-small">Aucune demande en attente.</span>';
+ $('adminRequests').innerHTML=adminSnapshot.requests.map(r=>'<div class="social-item"><span class="social-person">'+avatarHtml(r.requester_avatar,r.requester)+'<span><b>'+escapeHtml(r.requester)+'</b> demande '+escapeHtml(r.action)+' '+(r.target_avatar?avatarHtml(r.target_avatar,r.target):'')+(r.target?'<b>'+escapeHtml(r.target)+'</b>':('score #'+r.score_id))+'<br><small class="social-small">'+escapeHtml(r.reason||'Sans motif')+'</small></span></span><span><button onclick="reviewAdminRequest('+r.id+',\'approve\')">Valider</button> <button class="ghost" onclick="reviewAdminRequest('+r.id+',\'reject\')">Refuser</button></span></div>').join('')||'<span class="social-small">Aucune demande en attente.</span>';
 }
 async function showAdminHistory(id){
- try{const d=await api('/api/admin/history/'+id);$('adminHistory').innerHTML='<b>'+escapeHtml(d.user.username)+'</b> · '+d.history.length+' scores<br>'+d.history.map(s=>'<div class="chat-msg">#'+s.id+' · '+s.clicks+' clics · '+s.duration+'s · '+Number(s.cps).toFixed(2)+' CPS · '+new Date(s.created_at*1000).toLocaleString()+'</div>').join('')||'<p class="social-small">Aucun score enregistré.</p>'}catch(e){$('adminHistory').textContent=e.message}
+ try{const d=await api('/api/admin/history/'+id);$('adminHistory').innerHTML='<div class="social-person">'+avatarHtml(d.user.avatar_data,d.user.username)+'<b>'+escapeHtml(d.user.username)+'</b></div> · '+d.history.length+' scores<br>'+d.history.map(s=>'<div class="chat-msg">#'+s.id+' · '+s.clicks+' clics · '+s.duration+'s · '+Number(s.cps).toFixed(2)+' CPS · '+new Date(s.created_at*1000).toLocaleString()+'</div>').join('')||'<p class="social-small">Aucun score enregistré.</p>'}catch(e){$('adminHistory').textContent=e.message}
 }
 async function adminAction(action,targetId=null,scoreId=null){
  let reason='';
