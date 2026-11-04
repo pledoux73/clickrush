@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClickRush — Test de vitesse de clic</title>
+<style>
+:root{--bg:#0b1020;--panel:#121a30;--panel2:#18233e;--text:#edf2ff;--muted:#9aa8c7;--line:#293653;--accent:#7c5cff;--cyan:#39d6d0;--good:#4ade80;--danger:#fb7185}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 15% 0%,#20214a 0,transparent 42%),var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh}button,input{font:inherit}button{cursor:pointer;border:0;border-radius:12px;padding:11px 16px;font-weight:750;color:white;background:var(--accent);transition:.15s}button:hover{filter:brightness(1.12);transform:translateY(-1px)}button:disabled{opacity:.45;cursor:not-allowed;transform:none}.secondary{background:#263451}.ghost{background:transparent;border:1px solid var(--line);color:var(--muted)}.wrap{max-width:1120px;margin:auto;padding:24px}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:28px}.brand{font-size:25px;font-weight:950;letter-spacing:-1px}.brand span{color:var(--cyan)}.userbar{display:flex;align-items:center;gap:10px;color:var(--muted)}.hero{text-align:center;margin:30px 0 26px}.eyebrow{color:var(--cyan);font-weight:800;letter-spacing:2px;font-size:12px}.hero h1{font-size:clamp(32px,6vw,54px);line-height:1.05;margin:8px 0}.hero p{color:var(--muted);margin:10px 0}.grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,.8fr);gap:18px}.panel{background:linear-gradient(145deg,rgba(24,35,62,.96),rgba(17,25,45,.96));border:1px solid var(--line);border-radius:20px;padding:22px;box-shadow:0 15px 40px #0002}.panel h2{margin:0 0 16px;font-size:18px}.durations{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:14px 0}.durations button{background:#263451;color:#c8d3ec;padding:8px 15px}.durations button.active{background:var(--accent);color:#fff}.arena{width:100%;min-height:235px;border:1px solid #5749a5;background:radial-gradient(circle at 50% 40%,#393078,#1a2140 70%);border-radius:18px;color:white;display:flex;flex-direction:column;align-items:center;justify-content:center;user-select:none;touch-action:manipulation;position:relative;overflow:hidden}.arena:active{transform:scale(.995)}.arena .big{font-size:clamp(27px,5vw,42px);font-weight:950;letter-spacing:-1px}.arena .small{color:#c5c1ed;margin-top:5px}.arena .hint{font-size:12px;color:#a9a4d8;margin-top:18px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}.metric{background:#0e172b;border:1px solid var(--line);border-radius:14px;padding:13px;text-align:center}.metric strong{display:block;font-size:25px}.metric span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}.side{display:grid;gap:18px;align-content:start}.tabs{display:flex;gap:8px;margin-bottom:15px}.tabs button{flex:1}.leader-row{display:grid;grid-template-columns:35px 1fr auto;gap:8px;padding:10px 0;border-bottom:1px solid var(--line);align-items:center}.rank{color:var(--cyan);font-weight:900}.score{font-weight:850}.muted{color:var(--muted)}.empty{text-align:center;color:var(--muted);padding:20px 0}.profile-stats{display:flex;gap:10px}.profile-stats>div{flex:1;background:#0e172b;border-radius:12px;padding:12px}.profile-stats strong{display:block;font-size:22px}.profile-stats small{color:var(--muted)}.auth{max-width:410px;margin:8vh auto;padding:26px}.auth h2{margin-top:0}.field{display:grid;gap:6px;margin:13px 0}.field label{color:var(--muted);font-size:13px}.field input{width:100%;border:1px solid var(--line);background:#0c1426;color:white;border-radius:11px;padding:12px;outline:none}.field input:focus{border-color:var(--accent)}.auth-actions{display:flex;gap:8px;margin-top:18px}.auth-actions button{flex:1}.note{font-size:12px;color:var(--muted);margin-top:12px}.notice{min-height:22px;color:var(--cyan);font-size:13px;margin-top:10px}.hidden{display:none!important}.history{font-size:13px}.history div{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)}footer{text-align:center;color:#7482a2;font-size:12px;padding:28px 0 10px}
+#replayBtn{display:block;margin:14px auto 0;min-width:150px}
+@media(max-width:780px){.wrap{padding:15px}.grid{grid-template-columns:1fr}.top{align-items:flex-start}.userbar{font-size:13px}.panel{padding:17px}.arena{min-height:220px}.hero{margin-top:22px}}
+</style></head>
+<body><div class="wrap">
+<header class="top"><div class="brand">CLICK<span>RUSH</span> ⚡</div><div class="userbar"><span id="welcome">Invité</span><button id="registerBtn" onclick="showAuth('register')">Créer un compte</button><button id="authBtn" class="secondary" onclick="showAuth('login')">Connexion</button><button id="logoutBtn" class="ghost hidden" onclick="logout()">Déconnexion</button></div></header>
+<section class="hero"><div class="eyebrow">ENTRAÎNE TES RÉFLEXES</div><h1>À quelle vitesse peux-tu cliquer ?</h1><p>Teste ton CPS, bats ton record et grimpe dans le classement.</p></section>
+<div class="grid"><main class="panel"><h2>🎯 Test de clic</h2><div class="durations" id="durations"><button data-time="5">5 sec</button><button data-time="10" class="active">10 sec</button><button data-time="15">15 sec</button><button data-time="30">30 sec</button><button data-time="60">60 sec</button></div>
+<button class="arena" id="arena" onclick="tap()"><span class="big" id="arenaTitle">CLIQUE ICI !</span><span class="small" id="arenaSub">Appuie pour commencer</span><span class="hint">Chaque clic compte • Espace fonctionne aussi</span></button>
+<button id="replayBtn" class="hidden" onclick="resetGame()">🔄 Rejouer</button>
+<div class="metrics"><div class="metric"><strong id="clicks">0</strong><span>Clics</span></div><div class="metric"><strong id="cps">0.00</strong><span>CPS</span></div><div class="metric"><strong id="timer">10.0</strong><span>Secondes</span></div></div><div class="notice" id="gameNotice" aria-live="polite"></div></main>
+<aside class="side"><section class="panel"><h2>🏆 Classement mondial</h2><div class="tabs" id="boardTabs"><button class="active" data-time="10">10s</button><button class="secondary" data-time="5">5s</button><button class="secondary" data-time="30">30s</button><button class="secondary" data-time="60">60s</button></div><div id="leaderboard" class="empty">Chargement…</div></section>
+<section class="panel"><h2>👤 Mon profil</h2><div id="profile"><p class="muted">Connecte-toi pour sauvegarder tes scores et consulter ton historique.</p><button onclick="showAuth('register')">Créer un compte</button></div></section></aside></div>
+<footer>ClickRush • Les scores sont enregistrés sur ce serveur.</footer></div>
+<div id="authLayer" class="hidden" style="position:fixed;inset:0;background:#050916dd;z-index:5;padding:18px;overflow:auto"><div class="panel auth"><div class="brand">CLICK<span>RUSH</span> ⚡</div><h2 id="authTitle">Connexion</h2><div class="field"><label for="username">Pseudo</label><input id="username" maxlength="18" autocomplete="username" placeholder="TonPseudo"></div><div class="field"><label for="password">Mot de passe</label><input id="password" type="password" autocomplete="current-password" placeholder="8 caractères minimum"></div><div class="auth-actions"><button id="authSubmit" onclick="submitAuth()">Se connecter</button><button class="ghost" onclick="hideAuth()">Fermer</button></div><p class="note" id="authSwitch">Pas encore de compte ? <a href="#" onclick="toggleAuth();return false" style="color:var(--cyan)">Créer un compte</a></p><div class="notice" id="authNotice"></div></div></div>
+<script>
+let csrf='', user=null, selectedDuration=10, boardDuration=10, running=false, finished=false, clicks=0, startedAt=0, endAt=0, raf=0, mode='login';
+const $=id=>document.getElementById(id);
+async function api(url, options={}){const res=await fetch(url,{...options,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,...(options.headers||{})}});let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.error||'Une erreur est survenue.');return data}
+async function init(){try{const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;user=s.user;renderUser(s);loadBoard();}catch(e){$('leaderboard').textContent='Impossible de contacter le serveur.'}}
+function renderUser(s){$('welcome').textContent=user?'Salut, '+user.username:'Invité';$('authBtn').classList.toggle('hidden',!!user);$('registerBtn').classList.toggle('hidden',!!user);$('logoutBtn').classList.toggle('hidden',!user);if(!user){$('profile').innerHTML='<p class="muted">Connecte-toi pour sauvegarder tes scores et consulter ton historique.</p><button onclick="showAuth(\'register\')">Créer un compte</button>';return}const stats=s.stats||{best:0,total:0};let history=(s.history||[]).map(x=>`<div><span>${x.clicks} clics · ${x.duration}s</span><b>${Number(x.cps).toFixed(2)} CPS</b></div>`).join('')||'<p class="muted">Aucun score pour le moment.</p>';$('profile').innerHTML=`<div class="profile-stats"><div><strong>${stats.best.toFixed(2)}</strong><small>Meilleur CPS</small></div><div><strong>${stats.total}</strong><small>Tests joués</small></div></div><h3 style="font-size:14px;margin:17px 0 5px">Derniers tests</h3><div class="history">${history}</div>`}
+function showAuth(startMode='login'){mode=startMode;$('authLayer').classList.remove('hidden');$('authNotice').textContent='';$('username').focus();updateAuth()}
+function hideAuth(){$('authLayer').classList.add('hidden')}
+function toggleAuth(){mode=mode==='login'?'register':'login';$('authNotice').textContent='';updateAuth()}
+function updateAuth(){$('authTitle').textContent=mode==='login'?'Connexion':'Créer un compte';$('authSubmit').textContent=mode==='login'?'Se connecter':'Créer mon compte';$('password').autocomplete=mode==='login'?'current-password':'new-password';$('authSwitch').innerHTML=mode==='login'?'Pas encore de compte ? <a href="#" onclick="toggleAuth();return false" style="color:var(--cyan)">Créer un compte</a>':'Déjà un compte ? <a href="#" onclick="toggleAuth();return false" style="color:var(--cyan)">Se connecter</a>'}
+async function submitAuth(){const username=$('username').value.trim(),password=$('password').value;$('authNotice').textContent='';try{await api('/api/'+mode,{method:'POST',body:JSON.stringify({username,password})});hideAuth();const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;user=s.user;renderUser(s);$('gameNotice').textContent='Connecté ! Tes prochains scores seront sauvegardés.';}catch(e){$('authNotice').textContent=e.message}}
+async function logout(){try{await api('/api/logout',{method:'POST'});user=null;const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;renderUser(s)}catch(e){$('gameNotice').textContent=e.message}}
+$('durations').addEventListener('click',e=>{const b=e.target.closest('button[data-time]');if(!b||running)return;selectedDuration=Number(b.dataset.time);$('durations').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));resetGame()});
+$('boardTabs').addEventListener('click',e=>{const b=e.target.closest('button[data-time]');if(!b)return;boardDuration=Number(b.dataset.time);$('boardTabs').querySelectorAll('button').forEach(x=>{x.classList.toggle('active',x===b);x.classList.toggle('secondary',x!==b)});loadBoard()});
+function resetGame(){running=false;finished=false;clicks=0;cancelAnimationFrame(raf);$('clicks').textContent='0';$('cps').textContent='0.00';$('timer').textContent=selectedDuration.toFixed(1);$('arenaTitle').textContent='CLIQUE ICI !';$('arenaSub').textContent='Appuie pour commencer';$('gameNotice').textContent='';$('replayBtn').classList.add('hidden')}
+function tap(){
+  // Une fois le test terminé, les clics sont ignorés. Seul « Rejouer » réinitialise le test.
+  if(finished)return;
+  const now=performance.now();
+  if(!running){
+    running=true;
+    startedAt=now;
+    endAt=startedAt+selectedDuration*1000;
+    $('arenaTitle').textContent='CLIQUE !';
+    $('arenaSub').textContent='Continue le plus vite possible';
+    tick();
+  }
+  if(now>=endAt){finish();return}
+  clicks++;
+  $('clicks').textContent=clicks;
+  $('cps').textContent=(clicks/Math.max((now-startedAt)/1000,.01)).toFixed(2);
+}
+function tick(){if(!running)return;const now=performance.now(),left=Math.max(0,(endAt-now)/1000);$('timer').textContent=left.toFixed(1);$('cps').textContent=(clicks/Math.max((Math.min(now,endAt)-startedAt)/1000,.01)).toFixed(2);if(left<=0){finish();return}raf=requestAnimationFrame(tick)}
+async function finish(){
+  if(finished)return;
+  running=false;
+  finished=true;
+  const cps=clicks/selectedDuration;
+  $('timer').textContent='0.0';
+  $('cps').textContent=cps.toFixed(2);
+  $('arenaTitle').textContent=cps.toFixed(2)+' CPS';
+  $('arenaSub').textContent='TEST TERMINÉ !';
+  $('gameNotice').textContent=`Résultat : ${clicks} clics en ${selectedDuration} secondes.`;
+  $('replayBtn').classList.remove('hidden');
+  if(user){
+    try{
+      await api('/api/score',{method:'POST',body:JSON.stringify({clicks,duration:selectedDuration})});
+      const s=await fetch('/api/state').then(r=>r.json());
+      csrf=s.csrf;user=s.user;renderUser(s);loadBoard();
+      $('gameNotice').textContent+=' Score sauvegardé !';
+    }catch(e){$('gameNotice').textContent+=' '+e.message}
+  }else{
+    $('gameNotice').textContent+=' Connecte-toi pour enregistrer ton score.';
+  }
+}
+document.addEventListener('keydown',e=>{if(e.code==='Space'&&!$('authLayer').classList.contains('hidden'))return;if(e.code==='Space'&&e.target.tagName!=='INPUT'&&e.target.tagName!=='BUTTON'){e.preventDefault();tap()}});
+async function loadBoard(){try{const rows=await fetch('/api/leaderboard?duration='+boardDuration).then(r=>r.json());$('leaderboard').innerHTML=rows.length?rows.map((r,i)=>`<div class="leader-row"><span class="rank">#${i+1}</span><b>${escapeHtml(r.username)}</b><span class="score">${Number(r.cps).toFixed(2)} <small class="muted">CPS</small></span></div>`).join(''):'<div class="empty">Pas encore de scores. À toi de jouer !</div>'}catch{$('leaderboard').textContent='Classement indisponible.'}}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+init();
+</script></body></html>
