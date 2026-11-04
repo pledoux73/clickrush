@@ -228,7 +228,8 @@ def client_ip_fingerprint():
     # Render transmet l'adresse cliente dans X-Forwarded-For.
     # Le reverse proxy doit écraser ce header (ne pas exposer Flask directement).
     forwarded = request.headers.get('X-Forwarded-For', '')
-    ip = (forwarded.split(',')[0].strip() if forwarded else request.remote_addr) or ''
+    # Le proxy ajoute l'adresse cliente à la fin de la chaîne X-Forwarded-For.
+    ip = (forwarded.split(',')[-1].strip() if forwarded else request.remote_addr) or ''
     if not ip:
         return None
     # HMAC : l'adresse IP brute n'est jamais enregistrée en base.
