@@ -108,7 +108,7 @@ async function loadDirectMessages(){
 }
 async function loadGroupMessages(){
  if(groupLoading||document.hidden||!activeGroupId||activeMessageType!=="group")return;groupLoading=true;
- try{const d=await api("/api/groups/"+activeGroupId+"/messages");const el=$("messageChat");if(!el)return;el.innerHTML=d.messages.map(m=>"<div class='chat-msg'><b>"+escapeHtml(m.username)+"</b> · "+new Date(m.created_at*1000).toLocaleString()+"<br>"+escapeHtml(m.body)+"</div>").join("")||"<span class='social-small'>Le groupe vient d’être créé. Envoie le premier message !</span>";el.scrollTop=el.scrollHeight}
+ try{const d=await api("/api/groups/"+activeGroupId+"/messages");const el=$("messageChat");if(!el)return;el.innerHTML=d.messages.map(messageHtml).join("")||"<span class='social-small'>Le groupe vient d’être créé. Envoie le premier message !</span>";el.scrollTop=el.scrollHeight}
  catch(e){$("messageChat").textContent=e.message}finally{groupLoading=false}
 }
 async function sendActiveMessage(){
@@ -120,7 +120,7 @@ async function createClub(){try{await api("/api/clubs",{method:"POST",body:JSON.
 async function joinClub(id){try{await api("/api/clubs/join",{method:"POST",body:JSON.stringify({club_id:id})});$("gameNotice").textContent="Tu as rejoint le club !";refreshSocial()}catch(e){$("gameNotice").textContent=e.message}}
 async function leaveClub(id){if(!confirm("Quitter ce club ?"))return;try{await api("/api/clubs/leave",{method:"POST",body:JSON.stringify({club_id:id})});if(activeClubId===id)activeClubId=null;refreshSocial()}catch(e){$("gameNotice").textContent=e.message}}
 async function openClub(id,name){activeClubId=id;activeClubName=name;activeFriendId=null;refreshSocial()}
-async function loadClubMessages(){if(clubLoading||document.hidden||!activeClubId)return;clubLoading=true;try{const d=await api("/api/clubs/"+activeClubId+"/messages");const el=$("clubMessages");if(!el)return;el.innerHTML=d.messages.map(m=>"<div class='chat-msg'><b>"+escapeHtml(m.username)+"</b> · "+new Date(m.created_at*1000).toLocaleString()+"<br>"+escapeHtml(m.body)+"</div>").join("")||"<span class='social-small'>Aucun message dans ce club.</span>";el.scrollTop=el.scrollHeight}catch(e){if($("clubMessages"))$("clubMessages").textContent=e.message}finally{clubLoading=false}}
+async function loadClubMessages(){if(clubLoading||document.hidden||!activeClubId)return;clubLoading=true;try{const d=await api("/api/clubs/"+activeClubId+"/messages");const el=$("clubMessages");if(!el)return;el.innerHTML=d.messages.map(m=>messageHtml({...m,sender_id:m.user_id})).join("")||"<span class='social-small'>Aucun message dans ce club.</span>";el.scrollTop=el.scrollHeight}catch(e){if($("clubMessages"))$("clubMessages").textContent=e.message}finally{clubLoading=false}}
 async function sendClubMessage(){const input=$("clubInput"),body=input.value.trim();if(!body)return;try{await api("/api/clubs/"+activeClubId+"/messages",{method:"POST",body:JSON.stringify({body})});input.value="";loadClubMessages()}catch(e){$("gameNotice").textContent=e.message}}
 
 
@@ -147,7 +147,7 @@ function renderAdminUsers(){
   if(user.role==='creator'&&u.role!=='creator'){
    actions+='<select aria-label="Rôle de '+escapeHtml(u.username)+'" onchange="setAdminRole('+u.id+',this.value)"><option value="user" '+(u.role==='user'?'selected':'')+'>Joueur</option><option value="mod" '+(u.role==='mod'?'selected':'')+'>Modo</option><option value="admin" '+(u.role==='admin'?'selected':'')+'>Admin</option></select>';
   }
-  return '<div class="social-item"><span><b>'+escapeHtml(u.username)+'</b><br><small class="social-small">'+u.role.toUpperCase()+(u.is_banned?' · BANNI':'')+'</small></span><span>'+actions+'</span></div>';
+  return '<div class="social-item"><span class="admin-person">'+avatarHtml(u.avatar_data,u.username)+'<span><b>'+escapeHtml(u.username)+'</b><br><small class="social-small">'+u.role.toUpperCase()+(u.is_banned?' · BANNI':'')+'</small></span></span><span>'+actions+'</span></div>';
  }).join('')||'<span class="social-small">Aucun joueur trouvé.</span>';
 }
 function renderAdminScores(){
@@ -157,12 +157,12 @@ function renderAdminScores(){
   const protectedUser=owner&&(owner.role==='creator'||(owner.role==='admin'&&user.role!=='creator'));
   const own=owner&&owner.id===user.id;
   const action=(!protectedUser&&!own&&user.role!=='mod')?'<button class="ghost" onclick="adminAction(\'delete_score\',null,'+s.id+')">Supprimer</button>':(!protectedUser&&!own&&user.role==='mod'?'<button class="secondary" onclick="adminAction(\'delete_score\',null,'+s.id+')">Demander suppression</button>':'');
-  return '<div class="social-item"><span><b>'+escapeHtml(s.username)+'</b><br><small class="social-small">#'+s.id+' · '+s.clicks+' clics / '+s.duration+'s · '+Number(s.cps).toFixed(2)+' CPS</small></span>'+action+'</div>';
+  return '<div class="social-item"><span class="social-person">'+avatarHtml(s.avatar_data,s.username)+'<span><b>'+escapeHtml(s.username)+'</b><br><small class="social-small">#'+s.id+' · '+s.clicks+' clics / '+s.duration+'s · '+Number(s.cps).toFixed(2)+' CPS</small></span></span>'+action+'</div>';
  }).join('')||'<span class="social-small">Aucun score.</span>';
 }
 function renderAdminRequests(){
  if(!adminSnapshot)return;
- $('adminRequests').innerHTML=adminSnapshot.requests.map(r=>'<div class="social-item"><span><b>'+escapeHtml(r.requester)+'</b> demande '+escapeHtml(r.action)+' '+(r.target||('score #'+r.score_id))+'<br><small class="social-small">'+escapeHtml(r.reason||'Sans motif')+'</small></span><span><button onclick="reviewAdminRequest('+r.id+',\'approve\')">Valider</button> <button class="ghost" onclick="reviewAdminRequest('+r.id+',\'reject\')">Refuser</button></span></div>').join('')||'<span class="social-small">Aucune demande en attente.</span>';
+ $('adminRequests').innerHTML=adminSnapshot.requests.map(r=>'<div class="social-item"><span class="social-person">'+avatarHtml(r.requester_avatar,r.requester)+'<span><b>'+escapeHtml(r.requester)+'</b> demande '+escapeHtml(r.action)+' '+(r.target||('score #'+r.score_id))+'<br><small class="social-small">'+escapeHtml(r.reason||'Sans motif')+'</small></span></span><span><button onclick="reviewAdminRequest('+r.id+',\'approve\')">Valider</button> <button class="ghost" onclick="reviewAdminRequest('+r.id+',\'reject\')">Refuser</button></span></div>').join('')||'<span class="social-small">Aucune demande en attente.</span>';
 }
 async function showAdminHistory(id){
  try{const d=await api('/api/admin/history/'+id);$('adminHistory').innerHTML='<b>'+escapeHtml(d.user.username)+'</b> · '+d.history.length+' scores<br>'+d.history.map(s=>'<div class="chat-msg">#'+s.id+' · '+s.clicks+' clics · '+s.duration+'s · '+Number(s.cps).toFixed(2)+' CPS · '+new Date(s.created_at*1000).toLocaleString()+'</div>').join('')||'<p class="social-small">Aucun score enregistré.</p>'}catch(e){$('adminHistory').textContent=e.message}
