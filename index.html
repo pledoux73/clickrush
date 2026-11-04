@@ -33,7 +33,7 @@ function hideProfile(){$('profileLayer').classList.add('hidden')}
 $('avatarFile').addEventListener('change',e=>{const file=e.target.files&&e.target.files[0];if(!file)return;if(!['image/jpeg','image/png','image/webp'].includes(file.type)){$('profileNotice').textContent='Choisis une image JPG, PNG ou WEBP.';return}if(file.size>5*1024*1024){$('profileNotice').textContent='Le fichier original doit faire moins de 5 Mo.';return}const url=URL.createObjectURL(file),img=new Image();img.onload=()=>{const canvas=document.createElement('canvas'),scale=Math.min(1,512/Math.max(img.width,img.height));canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);profileAvatarData=canvas.toDataURL('image/jpeg',.78);$('avatarPreview').textContent='';$('avatarPreview').style.backgroundImage='url("'+profileAvatarData+'")';$('avatarPreview').style.backgroundSize='cover';$('avatarPreview').style.backgroundPosition='center';$('profileNotice').textContent='Photo prête. Clique sur Enregistrer.';URL.revokeObjectURL(url)};img.onerror=()=>{$('profileNotice').textContent='Impossible de lire cette image.';URL.revokeObjectURL(url)};img.src=url});
 async function saveProfile(){const username=$('profileUsername').value.trim();$('profileNotice').textContent='Enregistrement…';try{await api('/api/profile',{method:'POST',body:JSON.stringify({username,avatar:profileAvatarData})});const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;user=s.user;renderUser(s);hideProfile();refreshSocial();$('gameNotice').textContent='Profil mis à jour !'}catch(e){$('profileNotice').textContent=e.message}}
 
-let activeFriendId=null, activeFriendName="", activeClubId=null, activeClubName="";
+let activeFriendId=null, activeFriendName="", activeClubId=null, activeClubName="", dmLoading=false, clubLoading=false, boardCache=new Map();
 async function refreshSocial(){
  const box=$("socialPanel"); if(!user){box.innerHTML="<p class='muted'>Connecte-toi pour accéder aux fonctions sociales.</p>";return}
  try{
@@ -56,13 +56,13 @@ async function sendFriendRequest(){try{await api("/api/friends/request",{method:
 async function respondFriend(id,action){try{await api("/api/friends/respond",{method:"POST",body:JSON.stringify({request_id:id,action})});refreshSocial()}catch(e){$("gameNotice").textContent=e.message}}
 async function removeFriend(id){if(!confirm("Retirer cet ami ?"))return;try{await api("/api/friends/remove",{method:"POST",body:JSON.stringify({friend_id:id})});if(activeFriendId===id)activeFriendId=null;refreshSocial()}catch(e){$("gameNotice").textContent=e.message}}
 async function openChat(id,name){activeFriendId=id;activeFriendName=name;activeClubId=null;refreshSocial()}
-async function loadDirectMessages(){try{const d=await api("/api/messages?friend_id="+activeFriendId);const el=$("dmMessages");if(!el)return;el.innerHTML=d.messages.map(m=>"<div class='chat-msg'><b>"+escapeHtml(m.username)+"</b> · "+new Date(m.created_at*1000).toLocaleString()+"<br>"+escapeHtml(m.body)+"</div>").join("")||"<span class='social-small'>Aucun message. Lance la conversation !</span>";el.scrollTop=el.scrollHeight}catch(e){if($("dmMessages"))$("dmMessages").textContent=e.message}}
+async function loadDirectMessages(){if(dmLoading||document.hidden||!activeFriendId)return;dmLoading=true;try{const d=await api("/api/messages?friend_id="+activeFriendId);const el=$("dmMessages");if(!el)return;el.innerHTML=d.messages.map(m=>"<div class='chat-msg'><b>"+escapeHtml(m.username)+"</b> · "+new Date(m.created_at*1000).toLocaleString()+"<br>"+escapeHtml(m.body)+"</div>").join("")||"<span class='social-small'>Aucun message. Lance la conversation !</span>";el.scrollTop=el.scrollHeight}catch(e){if($("dmMessages"))$("dmMessages").textContent=e.message}finally{dmLoading=false}}
 async function sendDirectMessage(){const input=$("dmInput"),body=input.value.trim();if(!body)return;try{await api("/api/messages",{method:"POST",body:JSON.stringify({friend_id:activeFriendId,body})});input.value="";loadDirectMessages()}catch(e){$("gameNotice").textContent=e.message}}
 async function createClub(){try{await api("/api/clubs",{method:"POST",body:JSON.stringify({name:$("clubName").value.trim()})});$("gameNotice").textContent="Club créé !";refreshSocial()}catch(e){$("gameNotice").textContent=e.message}}
 async function joinClub(id){try{await api("/api/clubs/join",{method:"POST",body:JSON.stringify({club_id:id})});$("gameNotice").textContent="Tu as rejoint le club !";refreshSocial()}catch(e){$("gameNotice").textContent=e.message}}
 async function leaveClub(id){if(!confirm("Quitter ce club ?"))return;try{await api("/api/clubs/leave",{method:"POST",body:JSON.stringify({club_id:id})});if(activeClubId===id)activeClubId=null;refreshSocial()}catch(e){$("gameNotice").textContent=e.message}}
 async function openClub(id,name){activeClubId=id;activeClubName=name;activeFriendId=null;refreshSocial()}
-async function loadClubMessages(){try{const d=await api("/api/clubs/"+activeClubId+"/messages");const el=$("clubMessages");if(!el)return;el.innerHTML=d.messages.map(m=>"<div class='chat-msg'><b>"+escapeHtml(m.username)+"</b> · "+new Date(m.created_at*1000).toLocaleString()+"<br>"+escapeHtml(m.body)+"</div>").join("")||"<span class='social-small'>Aucun message dans ce club.</span>";el.scrollTop=el.scrollHeight}catch(e){if($("clubMessages"))$("clubMessages").textContent=e.message}}
+async function loadClubMessages(){if(clubLoading||document.hidden||!activeClubId)return;clubLoading=true;try{const d=await api("/api/clubs/"+activeClubId+"/messages");const el=$("clubMessages");if(!el)return;el.innerHTML=d.messages.map(m=>"<div class='chat-msg'><b>"+escapeHtml(m.username)+"</b> · "+new Date(m.created_at*1000).toLocaleString()+"<br>"+escapeHtml(m.body)+"</div>").join("")||"<span class='social-small'>Aucun message dans ce club.</span>";el.scrollTop=el.scrollHeight}catch(e){if($("clubMessages"))$("clubMessages").textContent=e.message}finally{clubLoading=false}}
 async function sendClubMessage(){const input=$("clubInput"),body=input.value.trim();if(!body)return;try{await api("/api/clubs/"+activeClubId+"/messages",{method:"POST",body:JSON.stringify({body})});input.value="";loadClubMessages()}catch(e){$("gameNotice").textContent=e.message}}
 
 function showAuth(startMode='login'){mode=startMode;$('authLayer').classList.remove('hidden');$('authNotice').textContent='';$('username').focus();updateAuth()}
@@ -107,6 +107,7 @@ async function finish(){
     try{
       await api('/api/score',{method:'POST',body:JSON.stringify({clicks,duration:selectedDuration})});
       const s=await fetch('/api/state').then(r=>r.json());
+      boardCache.clear();
       csrf=s.csrf;user=s.user;renderUser(s);loadBoard();
       $('gameNotice').textContent+=' Score sauvegardé !';
     }catch(e){$('gameNotice').textContent+=' '+e.message}
@@ -115,8 +116,8 @@ async function finish(){
   }
 }
 document.addEventListener('keydown',e=>{if(e.code==='Space'&&!$('authLayer').classList.contains('hidden'))return;if(e.code==='Space'&&e.target.tagName!=='INPUT'&&e.target.tagName!=='BUTTON'){e.preventDefault();tap()}});
-async function loadBoard(){try{const rows=await fetch('/api/leaderboard?duration='+boardDuration).then(r=>r.json());$('leaderboard').innerHTML=rows.length?rows.map((r,i)=>`<div class="leader-row"><span class="rank">#${i+1}</span><b>${escapeHtml(r.username)}</b><span class="score">${Number(r.cps).toFixed(2)} <small class="muted">CPS</small></span></div>`).join(''):'<div class="empty">Pas encore de scores. À toi de jouer !</div>'}catch{$('leaderboard').textContent='Classement indisponible.'}}
+async function loadBoard(force=false){try{const cached=boardCache.get(boardDuration);let rows;if(!force&&cached&&Date.now()-cached.time<15000){rows=cached.rows}else{rows=await fetch('/api/leaderboard?duration='+boardDuration).then(r=>r.json());boardCache.set(boardDuration,{rows,time:Date.now()})}$('leaderboard').innerHTML=rows.length?rows.map((r,i)=>`<div class="leader-row"><span class="rank">#${i+1}</span><b>${escapeHtml(r.username)}</b><span class="score">${Number(r.cps).toFixed(2)} <small class="muted">CPS</small></span></div>`).join(''):'<div class="empty">Pas encore de scores. À toi de jouer !</div>'}catch{$('leaderboard').textContent='Classement indisponible.'}}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-setInterval(()=>{if(activeFriendId)loadDirectMessages();if(activeClubId)loadClubMessages()},4000);
+setInterval(()=>{if(document.hidden)return;if(activeFriendId)loadDirectMessages();if(activeClubId)loadClubMessages()},5000);
 init();
 </script></body></html>
