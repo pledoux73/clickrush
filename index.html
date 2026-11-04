@@ -183,9 +183,17 @@ async function showAdminHistory(id){
   const d=await api('/api/admin/history/'+encodeURIComponent(id));
   if(!d||!d.user||!Array.isArray(d.history))throw new Error('Réponse invalide du serveur.');
   panel.innerHTML='<div class="social-person">'+avatarHtml(d.user.avatar_data,d.user.username)+'<b>'+escapeHtml(d.user.username)+'</b></div><p class="social-small">'+d.history.length+' parties enregistrées</p>'+(
-   d.history.map(s=>'<div class="chat-msg"><span>#'+s.id+' · '+s.clicks+' clics · '+s.duration+'s · '+Number(s.cps).toFixed(2)+' CPS · '+new Date(s.created_at*1000).toLocaleString()+'</span><button type="button" class="secondary" onclick="playAdminReplay('+Number(s.id)+')">▶ Revoir</button></div>').join('')||'<p class="social-small">Aucun score enregistré.</p>'
+   d.history.map(s=>'<div class="chat-msg" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><span>#'+s.id+' · '+s.clicks+' clics · '+s.duration+'s · '+Number(s.cps).toFixed(2)+' CPS · '+new Date(s.created_at*1000).toLocaleString()+'</span><span style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="secondary" onclick="playAdminReplay('+Number(s.id)+')">▶ Revoir</button>'+(user&&user.role==='creator'&&Number(d.user.id)===Number(user.id)?'<button type="button" class="ghost" onclick="deleteAdminOwnHistoryScore('+Number(s.id)+','+Number(d.user.id)+')">🗑 Supprimer</button>':'')+'</span></div>').join('')||'<p class="social-small">Aucun score enregistré.</p>'
   );
  }catch(e){panel.textContent='Impossible de charger l’historique : '+e.message}
+}
+async function deleteAdminOwnHistoryScore(scoreId,targetId){
+ if(!user||user.role!=='creator'||Number(targetId)!==Number(user.id))return;
+ if(!confirm('Supprimer définitivement cette partie de ton historique ?'))return;
+ try{
+  await api('/api/profile/history/'+Number(scoreId)+'/delete',{method:'POST'});
+  await showAdminHistory(targetId);
+ }catch(e){alert('Impossible de supprimer cette partie : '+e.message)}
 }
 async function playAdminReplay(scoreId){
  const panel=$('replayPageContent');showPage('replay');panel.innerHTML='<p class="muted">Chargement du replay #'+Number(scoreId)+'…</p>';
