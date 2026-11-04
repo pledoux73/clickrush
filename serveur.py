@@ -322,7 +322,7 @@ def state():
         with db() as con:
             profile = con.execute('SELECT avatar_data FROM users WHERE id=?', (user['id'],)).fetchone()
             best = con.execute('SELECT MAX(cps) AS best, COUNT(*) AS total FROM scores WHERE user_id=?', (user['id'],)).fetchone()
-            recent = con.execute('SELECT clicks, duration, cps, created_at FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 10', (user['id'],)).fetchall()
+            recent = con.execute('SELECT id, clicks, duration, cps, created_at FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 10', (user['id'],)).fetchall()
             notices = con.execute('SELECT id,body,created_at FROM player_notifications WHERE user_id=? AND seen=? ORDER BY created_at DESC LIMIT 5', (user['id'], False if con.postgres else 0)).fetchall()
             if notices:
                 con.execute('UPDATE player_notifications SET seen=? WHERE user_id=?', (True if con.postgres else 1, user['id']))
