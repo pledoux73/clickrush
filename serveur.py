@@ -226,6 +226,14 @@ def current_user():
         row = con.execute('SELECT id, username, created_at, role, is_banned, ban_reason FROM users WHERE id=?', (uid,)).fetchone()
     if not row: return None
     user = dict(row)
+    # Le compte créateur pledoux73 est protégé contre toute suspension.
+    # Si une ancienne règle ou une modification SQL l'a banni, on répare son état.
+    if user.get('role') == 'creator' and user.get('is_banned'):
+        with db() as con:
+            con.execute('UPDATE users SET is_banned=?,ban_reason=NULL,anti_cheat_strikes=0 WHERE id=?',
+                (False if con.postgres else 0, user['id']))
+        user['is_banned'] = False
+        user['ban_reason'] = None
     if user.get('is_banned'):
         session.clear()
         return None
@@ -251,6 +259,7 @@ def apply_staff_action(con, actor, action, target_id=None, score_id=None, reason
         target = con.execute('SELECT id,role FROM users WHERE id=?', (target_id,)).fetchone()
         if not target: return 'Joueur introuvable.'
         if target['id'] == actor['id']: return 'Tu ne peux pas appliquer cette action à ton propre compte.'
+        if target['role'] == 'creator' and action == 'ban': return 'Le compte créateur est protégé contre les bannissements.'
         if protected_from(actor, target): return 'Tu ne peux pas modifier ce compte.'
         if action == 'ban':
             con.execute('UPDATE users SET is_banned=?,ban_reason=? WHERE id=?', (True if con.postgres else 1, reason[:300], target_id))
