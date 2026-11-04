@@ -117,5 +117,6 @@ async function finish(){
 document.addEventListener('keydown',e=>{if(e.code==='Space'&&!$('authLayer').classList.contains('hidden'))return;if(e.code==='Space'&&e.target.tagName!=='INPUT'&&e.target.tagName!=='BUTTON'){e.preventDefault();tap()}});
 async function loadBoard(){try{const rows=await fetch('/api/leaderboard?duration='+boardDuration).then(r=>r.json());$('leaderboard').innerHTML=rows.length?rows.map((r,i)=>`<div class="leader-row"><span class="rank">#${i+1}</span><b>${escapeHtml(r.username)}</b><span class="score">${Number(r.cps).toFixed(2)} <small class="muted">CPS</small></span></div>`).join(''):'<div class="empty">Pas encore de scores. À toi de jouer !</div>'}catch{$('leaderboard').textContent='Classement indisponible.'}}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+setInterval(()=>{if(activeFriendId)loadDirectMessages();if(activeClubId)loadClubMessages()},4000);
 init();
 </script></body></html>
