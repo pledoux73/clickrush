@@ -138,14 +138,85 @@ def init_db():
         con.execute('CREATE INDEX IF NOT EXISTS idx_dm_recipient_pair ON direct_messages(recipient_id,sender_id,created_at)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_scores_duration_cps ON scores(duration,cps DESC,user_id)')
 
+        if con.postgres:
+            con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'")
+            con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT FALSE")
+            con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT")
+            con.execute("""CREATE TABLE IF NOT EXISTS admin_settings (
+                id INTEGER PRIMARY KEY, creator_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL)""")
+            con.execute("""CREATE TABLE IF NOT EXISTS admin_requests (
+                id BIGSERIAL PRIMARY KEY, requester_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                action TEXT NOT NULL, target_user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+                score_id BIGINT, reason TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending',
+                reviewer_id BIGINT REFERENCES users(id) ON DELETE SET NULL, created_at BIGINT NOT NULL,
+                reviewed_at BIGINT)""")
+        else:
+            columns = [row['name'] for row in con.execute('PRAGMA table_info(users)').fetchall()]
+            if 'role' not in columns: con.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+            if 'is_banned' not in columns: con.execute("ALTER TABLE users ADD COLUMN is_banned INTEGER NOT NULL DEFAULT 0")
+            if 'ban_reason' not in columns: con.execute("ALTER TABLE users ADD COLUMN ban_reason TEXT")
+            con.execute("""CREATE TABLE IF NOT EXISTS admin_settings (
+                id INTEGER PRIMARY KEY, creator_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL)""")
+            con.execute("""CREATE TABLE IF NOT EXISTS admin_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, requester_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                action TEXT NOT NULL, target_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                score_id INTEGER, reason TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending',
+                reviewer_id INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at INTEGER NOT NULL,
+                reviewed_at INTEGER)""")
+        con.execute('INSERT INTO admin_settings(id,creator_user_id) VALUES(1,NULL) ON CONFLICT DO NOTHING')
+        creator = con.execute('SELECT id FROM users WHERE lower(username)=lower(?)', ('pledoux73',)).fetchone()
+        if creator:
+            con.execute('UPDATE admin_settings SET creator_user_id=? WHERE id=1 AND creator_user_id IS NULL', (creator['id'],))
+        con.execute("""UPDATE users SET role='creator' WHERE id=(
+            SELECT creator_user_id FROM admin_settings WHERE id=1 AND creator_user_id IS NOT NULL)""")
+        con.execute('CREATE INDEX IF NOT EXISTS idx_admin_requests_status ON admin_requests(status,created_at DESC)')
+
+
 
 def current_user():
-    # Keep session lookups lightweight: avatar_data can be a large base64 image.
     uid = session.get('user_id')
     if not uid: return None
     with db() as con:
-        row = con.execute('SELECT id, username, created_at FROM users WHERE id=?', (uid,)).fetchone()
-    return dict(row) if row else None
+        row = con.execute('SELECT id, username, created_at, role, is_banned, ban_reason FROM users WHERE id=?', (uid,)).fetchone()
+    if not row: return None
+    user = dict(row)
+    if user.get('is_banned'):
+        session.clear()
+        return None
+    return user
+
+def is_staff(user):
+    return bool(user and user.get('role') in ('creator','admin','mod'))
+
+def staff_required():
+    user = current_user()
+    if not user: return None, (jsonify(error='Connecte-toi avec un compte autorisé.'), 401)
+    if not is_staff(user): return None, (jsonify(error='Accès réservé à l’équipe de modération.'), 403)
+    return user, None
+
+def protected_from(actor, target):
+    # Admins cannot act on creator accounts or other admins. Only the creator can.
+    if target['role'] == 'creator': return actor['role'] != 'creator'
+    if target['role'] == 'admin': return actor['role'] != 'creator'
+    return False
+
+def apply_staff_action(con, actor, action, target_id=None, score_id=None, reason=''):
+    if action in ('ban','unban'):
+        target = con.execute('SELECT id,role FROM users WHERE id=?', (target_id,)).fetchone()
+        if not target: return 'Joueur introuvable.'
+        if target['id'] == actor['id']: return 'Tu ne peux pas appliquer cette action à ton propre compte.'
+        if protected_from(actor, target): return 'Tu ne peux pas modifier ce compte.'
+        if action == 'ban':
+            con.execute('UPDATE users SET is_banned=?,ban_reason=? WHERE id=?', (True if con.postgres else 1, reason[:300], target_id))
+        else:
+            con.execute('UPDATE users SET is_banned=?,ban_reason=NULL WHERE id=?', (False if con.postgres else 0, target_id))
+        return None
+    if action == 'delete_score':
+        score = con.execute('SELECT id FROM scores WHERE id=?', (score_id,)).fetchone()
+        if not score: return 'Score introuvable.'
+        con.execute('DELETE FROM scores WHERE id=?', (score_id,))
+        return None
+    return 'Action non autorisée.'
 
 def require_csrf():
     token = request.headers.get('X-CSRF-Token', '')
@@ -217,6 +288,10 @@ def login():
         user = con.execute('SELECT id, password_hash FROM users WHERE username=? COLLATE NOCASE' if not con.postgres else 'SELECT id, password_hash FROM users WHERE lower(username)=lower(?)', (username,)).fetchone()
     if not user or not check_password_hash(user['password_hash'], password):
         return jsonify(error='Pseudo ou mot de passe incorrect.'), 401
+    with db() as con:
+        account = con.execute('SELECT is_banned,ban_reason FROM users WHERE id=?', (user['id'],)).fetchone()
+    if account and account['is_banned']:
+        return jsonify(error='Compte suspendu. Motif : '+str(account['ban_reason'] or 'Non précisé')), 403
     session.clear(); session['user_id'] = user['id']; session['csrf_token'] = secrets.token_urlsafe(32)
     return jsonify(ok=True)
 
@@ -497,6 +572,105 @@ def send_club_message(club_id):
         member=con.execute('SELECT 1 FROM club_members WHERE club_id=? AND user_id=?',(club_id,user['id'])).fetchone()
         if not member:return jsonify(error='Tu dois rejoindre ce club.'),403
         con.execute('INSERT INTO club_messages(club_id,user_id,body,created_at) VALUES(?,?,?,?)',(club_id,user['id'],body,int(time.time())))
+    return jsonify(ok=True)
+
+
+@app.get('/api/admin')
+def admin_overview():
+    actor, error = staff_required()
+    if error: return error
+    with db() as con:
+        users = con.execute("""SELECT id,username,role,is_banned,ban_reason,created_at
+            FROM users ORDER BY lower(username) LIMIT 300""").fetchall()
+        scores = con.execute("""SELECT s.id,s.user_id,u.username,s.clicks,s.duration,s.cps,s.created_at
+            FROM scores s JOIN users u ON u.id=s.user_id ORDER BY s.created_at DESC LIMIT 100""").fetchall()
+        pending = con.execute("""SELECT r.id,r.action,r.target_user_id,r.score_id,r.reason,r.created_at,
+            req.username AS requester,target.username AS target
+            FROM admin_requests r JOIN users req ON req.id=r.requester_id
+            LEFT JOIN users target ON target.id=r.target_user_id
+            WHERE r.status='pending' ORDER BY r.created_at ASC LIMIT 100""").fetchall()
+    return jsonify(role=actor['role'],users=[dict(r) for r in users],
+        scores=[dict(r) for r in scores],requests=[dict(r) for r in pending])
+
+@app.get('/api/admin/history/<int:target_id>')
+def admin_history(target_id):
+    actor,error=staff_required()
+    if error:return error
+    with db() as con:
+        target=con.execute('SELECT id,username,role,is_banned,created_at FROM users WHERE id=?',(target_id,)).fetchone()
+        if not target:return jsonify(error='Joueur introuvable.'),404
+        rows=con.execute('SELECT id,clicks,duration,cps,created_at FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 200',(target_id,)).fetchall()
+    return jsonify(user=dict(target),history=[dict(r) for r in rows])
+
+@app.post('/api/admin/action')
+def admin_action():
+    bad=require_csrf()
+    if bad:return bad
+    actor,error=staff_required()
+    if error:return error
+    data=request.get_json(silent=True) or {}
+    action=str(data.get('action',''))
+    try:
+        target_id=int(data.get('target_id')) if data.get('target_id') is not None else None
+        score_id=int(data.get('score_id')) if data.get('score_id') is not None else None
+    except (TypeError,ValueError):return jsonify(error='Identifiant invalide.'),400
+    reason=str(data.get('reason','')).strip()[:300]
+    if action not in ('ban','unban','delete_score'):return jsonify(error='Action invalide.'),400
+    if actor['role']=='mod':
+        if action in ('ban','unban') and not target_id:return jsonify(error='Choisis un joueur.'),400
+        if action=='delete_score' and not score_id:return jsonify(error='Choisis un score.'),400
+        with db() as con:
+            if target_id:
+                target=con.execute('SELECT id,role FROM users WHERE id=?',(target_id,)).fetchone()
+                if not target:return jsonify(error='Joueur introuvable.'),404
+                if protected_from(actor,target) or target['id']==actor['id']:return jsonify(error='Action interdite sur ce compte.'),403
+            con.execute("""INSERT INTO admin_requests(requester_id,action,target_user_id,score_id,reason,status,created_at)
+                VALUES(?,?,?,?,?,'pending',?)""",(actor['id'],action,target_id,score_id,reason,int(time.time())))
+        return jsonify(ok=True,pending_approval=True)
+    if actor['role'] not in ('admin','creator'):return jsonify(error='Accès refusé.'),403
+    with db() as con:
+        message=apply_staff_action(con,actor,action,target_id,score_id,reason)
+    if message:return jsonify(error=message),400
+    return jsonify(ok=True)
+
+@app.post('/api/admin/role')
+def admin_set_role():
+    bad=require_csrf()
+    if bad:return bad
+    actor,error=staff_required()
+    if error:return error
+    if actor['role']!='creator':return jsonify(error='Seul le créateur peut nommer des administrateurs ou modérateurs.'),403
+    data=request.get_json(silent=True) or {}
+    try:target_id=int(data.get('target_id'))
+    except (TypeError,ValueError):return jsonify(error='Joueur invalide.'),400
+    role=str(data.get('role',''))
+    if role not in ('user','mod','admin'):return jsonify(error='Rôle invalide.'),400
+    with db() as con:
+        target=con.execute('SELECT id,role FROM users WHERE id=?',(target_id,)).fetchone()
+        if not target:return jsonify(error='Joueur introuvable.'),404
+        if target['role']=='creator':return jsonify(error='Le compte créateur ne peut pas être modifié.'),403
+        con.execute('UPDATE users SET role=? WHERE id=?',(role,target_id))
+    return jsonify(ok=True)
+
+@app.post('/api/admin/requests/<int:request_id>')
+def admin_review_request(request_id):
+    bad=require_csrf()
+    if bad:return bad
+    actor,error=staff_required()
+    if error:return error
+    if actor['role'] not in ('admin','creator'):return jsonify(error='Seuls les admins peuvent valider les demandes.'),403
+    data=request.get_json(silent=True) or {}
+    decision=data.get('decision')
+    if decision not in ('approve','reject'):return jsonify(error='Décision invalide.'),400
+    with db() as con:
+        req=con.execute("""SELECT id,requester_id,action,target_user_id,score_id,reason,status
+            FROM admin_requests WHERE id=?""",(request_id,)).fetchone()
+        if not req or req['status']!='pending':return jsonify(error='Demande déjà traitée ou introuvable.'),404
+        if decision=='approve':
+            message=apply_staff_action(con,actor,req['action'],req['target_user_id'],req['score_id'],req['reason'])
+            if message:return jsonify(error=message),400
+        con.execute('UPDATE admin_requests SET status=?,reviewer_id=?,reviewed_at=? WHERE id=?',
+            ('approved' if decision=='approve' else 'rejected',actor['id'],int(time.time()),request_id))
     return jsonify(ok=True)
 
 init_db()
