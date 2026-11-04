@@ -68,7 +68,7 @@ def init_db():
             con.execute('''CREATE TABLE IF NOT EXISTS scores (
                 id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 clicks INTEGER NOT NULL, duration INTEGER NOT NULL, cps DOUBLE PRECISION NOT NULL,
-                created_at BIGINT NOT NULL, auto_status TEXT NOT NULL DEFAULT 'clear', auto_reason TEXT NOT NULL DEFAULT '', click_pattern TEXT NOT NULL DEFAULT '')''')
+                created_at BIGINT NOT NULL, auto_status TEXT NOT NULL DEFAULT 'clear', auto_reason TEXT NOT NULL DEFAULT '', click_pattern TEXT NOT NULL DEFAULT '', auto_processed BOOLEAN NOT NULL DEFAULT FALSE)''')
         else:
             con.execute('''CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -76,12 +76,13 @@ def init_db():
             con.execute('''CREATE TABLE IF NOT EXISTS scores (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 clicks INTEGER NOT NULL, duration INTEGER NOT NULL, cps REAL NOT NULL, created_at INTEGER NOT NULL,
-                auto_status TEXT NOT NULL DEFAULT 'clear', auto_reason TEXT NOT NULL DEFAULT '', click_pattern TEXT NOT NULL DEFAULT '')''')
+                auto_status TEXT NOT NULL DEFAULT 'clear', auto_reason TEXT NOT NULL DEFAULT '', click_pattern TEXT NOT NULL DEFAULT '', auto_processed INTEGER NOT NULL DEFAULT 0)''')
         if con.postgres:
             con.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data TEXT')
             con.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS auto_status TEXT NOT NULL DEFAULT 'clear'")
             con.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS auto_reason TEXT NOT NULL DEFAULT ''")
             con.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS click_pattern TEXT NOT NULL DEFAULT ''")
+            con.execute('ALTER TABLE scores ADD COLUMN IF NOT EXISTS auto_processed BOOLEAN NOT NULL DEFAULT FALSE')
             con.execute('''CREATE TABLE IF NOT EXISTS player_notifications (
                 id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 body TEXT NOT NULL, created_at BIGINT NOT NULL, seen BOOLEAN NOT NULL DEFAULT FALSE)''')
@@ -93,6 +94,7 @@ def init_db():
             if 'auto_status' not in score_columns: con.execute("ALTER TABLE scores ADD COLUMN auto_status TEXT NOT NULL DEFAULT 'clear'")
             if 'auto_reason' not in score_columns: con.execute("ALTER TABLE scores ADD COLUMN auto_reason TEXT NOT NULL DEFAULT ''")
             if 'click_pattern' not in score_columns: con.execute("ALTER TABLE scores ADD COLUMN click_pattern TEXT NOT NULL DEFAULT ''")
+            if 'auto_processed' not in score_columns: con.execute('ALTER TABLE scores ADD COLUMN auto_processed INTEGER NOT NULL DEFAULT 0')
             con.execute('''CREATE TABLE IF NOT EXISTS player_notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 body TEXT NOT NULL, created_at INTEGER NOT NULL, seen INTEGER NOT NULL DEFAULT 0)''')
@@ -312,7 +314,7 @@ def state():
             recent = con.execute('SELECT clicks, duration, cps, created_at FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 10', (user['id'],)).fetchall()
         user['avatar_data'] = profile['avatar_data'] if profile else None
         result['stats'] = {'best': round(best['best'] or 0, 2), 'total': best['total']}
-        result['history'] = [dict(r) for r in recent]
+            result['history'] = [dict(r) for r in recent]
             notices = con.execute('SELECT id,body,created_at FROM player_notifications WHERE user_id=? AND seen=? ORDER BY created_at DESC LIMIT 5', (user['id'], False if con.postgres else 0)).fetchall()
             result['notifications'] = [dict(r) for r in notices]
             if notices:
@@ -784,7 +786,7 @@ def admin_auto_filter():
     with db() as con:
         rows = con.execute("""SELECT s.id,s.user_id,s.cps,s.click_pattern,u.role,u.username
             FROM scores s JOIN users u ON u.id=s.user_id
-            WHERE s.auto_status='clear' ORDER BY s.created_at DESC LIMIT 200""").fetchall()
+            WHERE s.auto_processed=? ORDER BY s.created_at DESC LIMIT 200""", (False if con.postgres else 0,)).fetchall()
         for row in rows:
             try:
                 gaps = [float(x) for x in (row['click_pattern'] or '').split(',') if x]
@@ -810,8 +812,8 @@ def admin_auto_filter():
             else:
                 status, reason = 'clear', ''
                 processed['clear'] += 1
-            con.execute('UPDATE scores SET auto_status=?,auto_reason=? WHERE id=?',
-                (status, reason, row['id']))
+            con.execute('UPDATE scores SET auto_status=?,auto_reason=?,auto_processed=? WHERE id=?',
+                (status, reason, True if con.postgres else 1, row['id']))
     return jsonify(ok=True, processed=processed)
 
 @app.get('/api/admin')
@@ -821,7 +823,7 @@ def admin_overview():
     with db() as con:
         users = con.execute("""SELECT id,username,avatar_data,role,is_banned,ban_reason,created_at
             FROM users ORDER BY lower(username) LIMIT 300""").fetchall()
-        scores = con.execute("""SELECT s.id,s.user_id,u.username,s.clicks,s.duration,s.cps,s.created_at,u.avatar_data,s.auto_status,s.auto_reason
+        scores = con.execute("""SELECT s.id,s.user_id,u.username,s.clicks,s.duration,s.cps,s.created_at,u.avatar_data,s.auto_status,s.auto_reason,s.auto_processed
             FROM scores s JOIN users u ON u.id=s.user_id ORDER BY s.created_at DESC LIMIT 100""").fetchall()
         if actor['role'] in ('admin','creator'):
             pending = con.execute("""SELECT r.id,r.action,r.target_user_id,r.score_id,r.reason,r.created_at,
