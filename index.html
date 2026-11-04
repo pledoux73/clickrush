@@ -26,7 +26,7 @@
 <section id="friendsPage" class="page-view hidden"><section class="panel"><h1>🤝 Amis</h1><div id="friendsPanel"><p class="muted">Connecte-toi pour retrouver tes amis et discuter.</p></div></section></section>
 <section id="messagesPage" class="page-view hidden"><h1>💬 Messages</h1><section class="panel discord-shell"><aside class="discord-side"><div class="discord-title">Conversations</div><div class="discord-section">Messages privés</div><div id="messageFriends" class="discord-list"><span class="social-small">Chargement…</span></div><div class="discord-section">Groupes</div><div id="messageGroups" class="discord-list"><span class="social-small">Chargement…</span></div><div class="discord-section">Nouveau groupe</div><div class="discord-create"><input id="groupName" maxlength="32" placeholder="Nom du groupe"><select id="groupMembers" multiple></select><p class="discord-hint">Sélectionne plusieurs amis (Ctrl ou Cmd + clic).</p><button onclick="createMessageGroup()">Créer le groupe</button></div></aside><main class="discord-main"><div id="messageChatTitle" class="discord-title">Sélectionne une conversation</div><div id="messageChat" class="discord-chat"><div class="empty">Tes discussions apparaîtront ici.</div></div><div class="discord-compose"><input id="messageInput" maxlength="1000" placeholder="Écris un message…" disabled onkeydown="if(event.key==='Enter')sendActiveMessage()"><button id="messageSend" onclick="sendActiveMessage()" disabled>Envoyer</button></div><div id="messageNotice" class="notice"></div></main></section></section>
 <section id="clubsPage" class="page-view hidden"><section class="panel"><h1>🏅 Ligues</h1><div id="clubsPanel"><p class="muted">Connecte-toi pour rejoindre des communautés.</p></div></section></section>
-<section id="adminPanel" class="panel hidden" style="margin-top:22px"><h2>🛡️ Centre d'administration</h2><p class="muted" id="adminIntro">Outils de gestion ClickRush.</p><div class="social-block"><b>Joueurs</b><div class="social-form"><input id="adminSearch" placeholder="Rechercher un pseudo…" oninput="filterAdminUsers()"><button onclick="loadAdmin()">Actualiser</button></div><div id="adminUsers" class="social-list">Chargement…</div></div><div class="social-block"><b>Historique des parties</b><button onclick="runAutoFilter()">⚡ Auto filtre</button><p class="discord-hint">Cheat : bannissement · Suspect : avertissement + mise en évidence · Clear : aucune action.</p><div id="adminScores" class="social-list">Chargement…</div></div><div class="social-block"><b>Demandes des modérateurs</b><div id="adminRequests" class="social-list">Chargement…</div></div><div class="social-block"><b>Historique du joueur</b><div id="adminHistory" class="chat-box">Sélectionne « Historique » sur un joueur.</div></div></section>
+<section id="adminPanel" class="panel hidden" style="margin-top:22px"><h2>🛡️ Centre d'administration</h2><p class="muted" id="adminIntro">Outils de gestion ClickRush.</p><div class="social-block"><b>Joueurs</b><div class="social-form"><input id="adminSearch" placeholder="Rechercher un pseudo…" oninput="filterAdminUsers()"><button onclick="loadAdmin()">Actualiser</button></div><div id="adminUsers" class="social-list">Chargement…</div></div><div class="social-block"><b>Historique des parties</b><button onclick="runAutoFilter()">⚡ Auto filtre</button><p class="discord-hint">Cheat : bannissement · Suspect : avertissement + mise en évidence · Clear : aucune action.</p><div id="adminScores" class="social-list">Chargement…</div></div><div class="social-block"><b>Demandes des modérateurs</b><div id="adminRequests" class="social-list">Chargement…</div></div><div class="social-block"><b>Historique du joueur</b><div id="adminHistory" class="chat-box">Sélectionne « Historique » sur un joueur.</div><div id="adminReplay" class="chat-box hidden"></div></div></section>
 <footer>ClickRush • Les scores sont enregistrés sur ce serveur.</footer></div>
 <div id="authLayer" class="hidden" style="position:fixed;inset:0;background:#050916dd;z-index:5;padding:18px;overflow:auto"><div class="panel auth"><div class="brand">CLICK<span>RUSH</span> ⚡</div><h2 id="authTitle">Connexion</h2><div class="field"><label for="username">Pseudo</label><input id="username" maxlength="18" autocomplete="username" placeholder="TonPseudo"></div><div class="field"><label for="password">Mot de passe</label><input id="password" type="password" autocomplete="current-password" placeholder="8 caractères minimum"></div><div class="auth-actions"><button id="authSubmit" onclick="submitAuth()">Se connecter</button><button class="ghost" onclick="hideAuth()">Fermer</button></div><p class="note" id="authSwitch">Pas encore de compte ? <a href="#" onclick="toggleAuth();return false" style="color:var(--cyan)">Créer un compte</a></p><div class="notice" id="authNotice"></div></div></div>
 <div id="profileLayer" class="hidden" style="position:fixed;inset:0;background:#050916dd;z-index:6;padding:18px;overflow:auto"><div class="panel auth"><div class="brand">CLICK<span>RUSH</span> ⚡</div><h2>Modifier mon profil</h2><div style="display:flex;justify-content:center;margin:18px"><div id="avatarPreview" class="avatar" style="width:110px;height:110px">👤</div></div><div class="field"><label for="avatarFile">Photo de profil</label><input id="avatarFile" type="file" accept="image/png,image/jpeg,image/webp"></div><div class="field"><label for="profileUsername">Pseudo</label><input id="profileUsername" maxlength="18" autocomplete="nickname"></div><div class="auth-actions"><button onclick="saveProfile()">Enregistrer</button><button class="ghost" onclick="hideProfile()">Annuler</button></div><div class="notice" id="profileNotice" aria-live="polite"></div><p class="note">Photo JPG, PNG ou WEBP. Elle sera réduite automatiquement.</p></div></div>
@@ -174,34 +174,67 @@ async function runAutoFilter(){
  try{const d=await api('/api/admin/auto-filter',{method:'POST',body:JSON.stringify({})});alert('Filtre terminé : '+d.processed.cheat+' cheat, '+d.processed.suspect+' suspect, '+d.processed.clear+' clear.');await loadAdmin()}catch(e){alert(e.message)}
 }
 async function showAdminHistory(id){
- try{const d=await api('/api/admin/history/'+id);$('adminHistory').innerHTML='<div class="social-person">'+avatarHtml(d.user.avatar_data,d.user.username)+'<b>'+escapeHtml(d.user.username)+'</b></div> · '+d.history.length+' scores<br>'+d.history.map(s=>'<div class="chat-msg"><span>#'+s.id+' · '+s.clicks+' clics · '+s.duration+'s · '+Number(s.cps).toFixed(2)+' CPS · '+new Date(s.created_at*1000).toLocaleString()+'</span><button class="secondary" onclick="playAdminReplay('+s.id+')">▶ Revoir</button></div>').join('')||'<p class="social-small">Aucun score enregistré.</p>';
- }catch(e){$('adminHistory').textContent=e.message}
+ const panel=$('adminHistory');
+ panel.textContent='Chargement de l’historique…';
+ try{
+  const d=await api('/api/admin/history/'+encodeURIComponent(id));
+  if(!d||!d.user||!Array.isArray(d.history))throw new Error('Réponse invalide du serveur.');
+  panel.innerHTML='<div class="social-person">'+avatarHtml(d.user.avatar_data,d.user.username)+'<b>'+escapeHtml(d.user.username)+'</b></div><p class="social-small">'+d.history.length+' parties enregistrées</p>'+(
+   d.history.map(s=>'<div class="chat-msg"><span>#'+s.id+' · '+s.clicks+' clics · '+s.duration+'s · '+Number(s.cps).toFixed(2)+' CPS · '+new Date(s.created_at*1000).toLocaleString()+'</span><button type="button" class="secondary" onclick="playAdminReplay('+Number(s.id)+')">▶ Revoir</button></div>').join('')||'<p class="social-small">Aucun score enregistré.</p>'
+  );
+ }catch(e){panel.textContent='Impossible de charger l’historique : '+e.message}
 }
 async function playAdminReplay(scoreId){
+ const panel=$('adminReplay');
+ panel.classList.remove('hidden');
+ panel.textContent='Chargement du replay #'+scoreId+'…';
  try{
-  const d=await api('/api/admin/replay/'+scoreId);stopAdminReplay();
-  if(!d.available){$('adminHistory').insertAdjacentHTML('beforeend','<p class="social-small">Cette partie est ancienne ou ne possède pas encore de replay. Les prochaines parties seront enregistrées.</p>');return}
+  const d=await api('/api/admin/replay/'+encodeURIComponent(scoreId));
+  stopAdminReplay();
+  panel.classList.remove('hidden');
+  if(!d||!d.score)throw new Error('Réponse invalide du serveur.');
+  if(!d.available||!Array.isArray(d.events)||!d.events.length){
+   panel.textContent='La partie #'+scoreId+' ne possède pas de replay. Seules les parties jouées après l’activation de cette fonction sont enregistrées.';
+   return;
+  }
   const keys=Array.from(new Set(d.events.filter(e=>e.type==='key').map(e=>e.key)));
   const keyboard=keys.length?keys:['SPACE'];
-  $('adminHistory').insertAdjacentHTML('beforeend','<section id="replayViewer" class="social-block"><b>Replay de '+escapeHtml(d.score.username)+' · #'+d.score.id+'</b><div class="replay-tools"><button id="replayPlay" onclick="startAdminReplay()">▶ Lire</button><button class="secondary" onclick="pauseAdminReplay()">Pause</button><button class="ghost" onclick="stopAdminReplay()">Arrêter</button><span id="replayClock" class="social-small">0.00 / '+d.score.duration.toFixed(2)+' s</span></div><div class="replay-track"><i id="replayProgress"></i></div><div id="replayArena" class="replay-arena">0 / '+d.score.clicks+' clics</div><div id="replayKeyboard" class="virtual-keyboard">'+keyboard.map(k=>'<span class="virtual-key" data-key="'+escapeHtml(k)+'">'+escapeHtml(k===' '||k==='Space'?'SPACE':k)+'</span>').join('')+'</div><div id="replayLog" class="replay-log">Prêt à lire · '+d.score.clicks+' clics · '+Number(d.score.cps).toFixed(2)+' CPS</div></section>');
-  gameReplay=d.events;window.replayTotalClicks=d.score.clicks;window.replayDuration=d.score.duration*1000;window.replayStart=0;window.replayElapsed=0;window.replayIndex=0;
- }catch(e){alert(e.message)}
+  panel.innerHTML='<section id="replayViewer" class="social-block"><b>Replay de '+escapeHtml(d.score.username)+' · #'+d.score.id+'</b><div class="replay-tools"><button type="button" id="replayPlay" onclick="startAdminReplay()">▶ Lire</button><button type="button" class="secondary" onclick="pauseAdminReplay()">Pause</button><button type="button" class="ghost" onclick="stopAdminReplay()">Arrêter</button><span id="replayClock" class="social-small">0.00 / '+Number(d.score.duration).toFixed(2)+' s</span></div><div class="replay-track"><i id="replayProgress"></i></div><div id="replayArena" class="replay-arena">0 / '+d.score.clicks+' clics</div><div id="replayKeyboard" class="virtual-keyboard">'+keyboard.map(k=>'<span class="virtual-key" data-key="'+escapeHtml(k)+'">'+escapeHtml(k===' '||k==='Space'?'SPACE':k)+'</span>').join('')+'</div><div id="replayLog" class="replay-log">Prêt à lire · '+d.score.clicks+' clics · '+Number(d.score.cps).toFixed(2)+' CPS</div></section>';
+  gameReplay=d.events.slice().sort((x,y)=>Number(x.t)-Number(y.t));
+  window.replayTotalClicks=Number(d.score.clicks)||0;
+  window.replayDuration=Math.max(1,Number(d.score.duration)*1000);
+  window.replayStart=0;window.replayElapsed=0;window.replayIndex=0;
+  panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+ }catch(e){panel.textContent='Impossible de lire cette partie : '+e.message}
 }
 function paintReplay(time){
  const viewer=$('replayViewer');if(!viewer)return;
- const progress=Math.min(1,time/window.replayDuration);$('replayProgress').style.width=(progress*100)+'%';$('replayClock').textContent=(time/1000).toFixed(2)+' / '+(window.replayDuration/1000).toFixed(2)+' s';
+ const progress=Math.min(1,time/window.replayDuration);
+ $('replayProgress').style.width=(progress*100)+'%';
+ $('replayClock').textContent=(time/1000).toFixed(2)+' / '+(window.replayDuration/1000).toFixed(2)+' s';
  document.querySelectorAll('#replayKeyboard .virtual-key').forEach(k=>k.classList.remove('active'));
- const passed=gameReplay.slice(0,window.replayIndex);const clickCount=passed.filter(e=>e.type==='click').length;$('replayArena').textContent=clickCount+' / '+(window.replayTotalClicks||0)+' clics';
- const active=passed.filter(e=>e.type==='key'&&time-e.t<180);
+ const passed=gameReplay.slice(0,window.replayIndex);
+ const clickCount=passed.filter(e=>e.type==='click').length;
+ $('replayArena').textContent=clickCount+' / '+(window.replayTotalClicks||0)+' clics';
+ const active=passed.filter(e=>e.type==='key'&&time-Number(e.t)<180);
  active.forEach(e=>{const k=Array.from(document.querySelectorAll('#replayKeyboard .virtual-key')).find(x=>x.dataset.key===e.key);if(k)k.classList.add('active')});
 }
 function startAdminReplay(){
- if(!gameReplay.length)return;pauseAdminReplay();
+ if(!gameReplay.length)return;
+ pauseAdminReplay();
  window.replayStart=performance.now()-window.replayElapsed;
- replayTimer=setInterval(()=>{const elapsed=Math.min(window.replayDuration,performance.now()-window.replayStart);while(window.replayIndex<gameReplay.length&&gameReplay[window.replayIndex].t<=elapsed)window.replayIndex++;window.replayElapsed=elapsed;paintReplay(elapsed);if(elapsed>=window.replayDuration){pauseAdminReplay();$('replayLog').textContent='Replay terminé.'}},25);
+ replayTimer=setInterval(()=>{
+  const elapsed=Math.min(window.replayDuration,performance.now()-window.replayStart);
+  while(window.replayIndex<gameReplay.length&&Number(gameReplay[window.replayIndex].t)<=elapsed)window.replayIndex++;
+  window.replayElapsed=elapsed;paintReplay(elapsed);
+  if(elapsed>=window.replayDuration){pauseAdminReplay();$('replayLog').textContent='Replay terminé.'}
+ },25);
 }
 function pauseAdminReplay(){if(replayTimer){clearInterval(replayTimer);replayTimer=null}}
-function stopAdminReplay(){pauseAdminReplay();gameReplay=[];window.replayElapsed=0;window.replayIndex=0;const v=$('replayViewer');if(v)v.remove()}
+function stopAdminReplay(){
+ pauseAdminReplay();gameReplay=[];window.replayElapsed=0;window.replayIndex=0;
+ const panel=$('adminReplay');if(panel){panel.classList.add('hidden');panel.innerHTML=''}
+}
 
 async function adminAction(action,targetId=null,scoreId=null){
  let reason='';
