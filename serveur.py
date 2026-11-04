@@ -232,7 +232,12 @@ def client_ip_fingerprint():
     if not ip:
         return None
     # HMAC : l'adresse IP brute n'est jamais enregistrée en base.
-    key = str(app.secret_key).encode('utf-8')
+    key_material = os.environ.get('IP_HASH_SECRET') or os.environ.get('SECRET_KEY')
+    # Sans secret stable configuré dans Render, on désactive le rapprochement IP
+    # plutôt que de créer des empreintes différentes à chaque redémarrage.
+    if not key_material:
+        return None
+    key = key_material.encode('utf-8')
     return hmac.new(key, ip.encode('utf-8'), hashlib.sha256).hexdigest()
 
 
