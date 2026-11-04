@@ -332,6 +332,20 @@ def state():
         result['notifications'] = [dict(r) for r in notices]
     return jsonify(result)
 
+@app.post('/api/profile/history/<int:score_id>/delete')
+def delete_own_history_score(score_id):
+    bad = require_csrf()
+    if bad: return bad
+    actor = current_user()
+    if not actor: return jsonify(error='Connecte-toi pour continuer.'), 401
+    if actor.get('role') != 'creator': return jsonify(error='Action réservée au compte créateur.'), 403
+    with db() as con:
+        score = con.execute('SELECT id,user_id FROM scores WHERE id=?', (score_id,)).fetchone()
+        if not score: return jsonify(error='Cette partie est introuvable.'), 404
+        if int(score['user_id']) != int(actor['id']): return jsonify(error='Tu peux uniquement supprimer tes propres parties ici.'), 403
+        con.execute('DELETE FROM scores WHERE id=?', (score_id,))
+    return jsonify(ok=True)
+
 @app.post('/api/register')
 def register():
     bad = require_csrf()
