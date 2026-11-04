@@ -168,19 +168,6 @@ def init_db():
             con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT")
             con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ip_hash TEXT")
             con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS anti_cheat_strikes INTEGER NOT NULL DEFAULT 0")
-            con.execute("""CREATE TABLE IF NOT EXISTS game_sessions (
-                id BIGSERIAL PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE,
-                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                duration INTEGER NOT NULL, started_at BIGINT NOT NULL,
-                expires_at BIGINT NOT NULL, used_at BIGINT)""")
-            con.execute('CREATE INDEX IF NOT EXISTS idx_game_sessions_user ON game_sessions(user_id,started_at DESC)')
-            con.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_game_sessions_one_open ON game_sessions(user_id) WHERE used_at IS NULL')
-            con.execute("""CREATE TABLE IF NOT EXISTS game_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, token_hash TEXT NOT NULL UNIQUE,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                duration INTEGER NOT NULL, started_at INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL, used_at INTEGER)""")
-            con.execute('CREATE INDEX IF NOT EXISTS idx_game_sessions_user ON game_sessions(user_id,started_at DESC)')
             con.execute("""CREATE TABLE IF NOT EXISTS admin_settings (
                 id INTEGER PRIMARY KEY, creator_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL)""")
             con.execute("""CREATE TABLE IF NOT EXISTS admin_requests (
@@ -435,31 +422,6 @@ def add_anti_cheat_strike(con, user_id, reason):
     return strikes
 
 
-@app.post('/api/game/start')
-def start_game_session():
-    bad = require_csrf()
-    if bad: return bad
-    user = current_user()
-    if not user: return jsonify(error='Connecte-toi pour lancer une partie classée.'), 401
-    data = request.get_json(silent=True) or {}
-    duration = data.get('duration')
-    if type(duration) is not int or duration not in (5, 10, 15, 30, 60):
-        return jsonify(error='Durée de partie invalide.'), 400
-    now = int(time.time() * 1000)
-    token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
-    with db() as con:
-        # Une session active maximum par joueur : évite les sessions parallèles artificielles.
-        con.execute('DELETE FROM game_sessions WHERE expires_at < ? OR used_at IS NOT NULL', (now,))
-        active = con.execute('SELECT id FROM game_sessions WHERE user_id=? AND used_at IS NULL AND expires_at>=? LIMIT 1',
-            (user['id'], now)).fetchone()
-        if active:
-            return jsonify(error='Une partie classée est déjà en cours. Termine-la avant d’en lancer une autre.'), 409
-        con.execute('INSERT INTO game_sessions(token_hash,user_id,duration,started_at,expires_at,used_at) VALUES(?,?,?,?,?,NULL)',
-            (token_hash, user['id'], duration, now, now + (duration + 120) * 1000))
-    return jsonify(ok=True, game_token=token, duration=duration)
-
-
 @app.post('/api/score')
 def save_score():
     bad = require_csrf()
@@ -470,35 +432,11 @@ def save_score():
     if not isinstance(data, dict) or type(data.get('clicks')) is not int or type(data.get('duration')) is not int:
         return jsonify(error='Format de score invalide.'), 400
     clicks, duration = data['clicks'], data['duration']
-    token = data.get('game_token')
     if duration not in (5, 10, 15, 30, 60) or clicks < 0 or clicks > duration * 30:
         return jsonify(error='Score hors limites.'), 400
-    if not isinstance(token, str) or len(token) < 32 or len(token) > 128:
-        return jsonify(error='Session de jeu manquante. Relance une partie.'), 400
-    token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
     cps = round(clicks / duration, 2)
     now = int(time.time())
-    now_ms = int(time.time() * 1000)
     with db() as con:
-        game = con.execute('SELECT id,duration,started_at,expires_at,used_at FROM game_sessions WHERE token_hash=? AND user_id=?',
-            (token_hash, user['id'])).fetchone()
-        if not game or game['used_at'] is not None or int(game['expires_at']) < now_ms:
-            strikes = add_anti_cheat_strike(con, user['id'], 'session de jeu absente, expirée ou réutilisée')
-            return jsonify(error='Score refusé : session de jeu invalide ('+str(strikes)+'/3 avertissements).'), 403
-        if int(game['duration']) != duration:
-            strikes = add_anti_cheat_strike(con, user['id'], 'durée différente de la session serveur')
-            return jsonify(error='Score refusé : durée de partie incohérente.'), 400
-        elapsed = (now_ms - int(game['started_at'])) / 1000
-        if elapsed < duration - 0.75:
-            strikes = add_anti_cheat_strike(con, user['id'], 'partie terminée avant la durée minimale')
-            return jsonify(error='Score refusé : partie terminée trop tôt ('+str(strikes)+'/3 avertissements).'), 400
-        if elapsed > duration + 120:
-            strikes = add_anti_cheat_strike(con, user['id'], 'session terminée hors délai')
-            return jsonify(error='Score refusé : session expirée.'), 400
-        # Consomme le jeton une seule fois avant d'enregistrer le résultat.
-        consumed = con.execute('UPDATE game_sessions SET used_at=? WHERE id=? AND used_at IS NULL', (now_ms, game['id']))
-        if consumed.rowcount != 1:
-            return jsonify(error='Score refusé : cette session a déjà été utilisée.'), 403
         # Un test normal dure au minimum la durée choisie. Cette vérification
         # bloque les envois répétés/fabriqués trop rapprochés.
         previous = con.execute('SELECT created_at FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 1',
