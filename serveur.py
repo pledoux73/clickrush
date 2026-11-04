@@ -875,7 +875,7 @@ def admin_history(target_id):
     with db() as con:
         target=con.execute('SELECT id,username,avatar_data,role,is_banned,created_at FROM users WHERE id=?',(target_id,)).fetchone()
         if not target:return jsonify(error='Joueur introuvable.'),404
-        rows=con.execute('SELECT id,clicks,duration,cps,created_at,auto_status,auto_reason,replay_data FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 200',(target_id,)).fetchall()
+        rows=con.execute('SELECT id,clicks,duration,cps,created_at,auto_status,auto_reason FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 200',(target_id,)).fetchall()
     return jsonify(user=dict(target),history=[dict(r) for r in rows])
 
 @app.post('/api/admin/action')
