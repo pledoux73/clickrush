@@ -482,7 +482,7 @@ def social_state():
     with db() as con:
         friends = con.execute("""SELECT u.id,u.username,u.avatar_data FROM friendships f
             JOIN users u ON u.id=f.friend_id WHERE f.user_id=? ORDER BY lower(u.username)""", (uid,)).fetchall()
-        incoming = con.execute("""SELECT r.id,u.username,u.id AS user_id FROM friend_requests r
+        incoming = con.execute("""SELECT r.id,u.username,u.id AS user_id,u.avatar_data FROM friend_requests r
             JOIN users u ON u.id=r.sender_id WHERE r.recipient_id=? AND r.status='pending'
             ORDER BY r.created_at DESC""", (uid,)).fetchall()
         outgoing = con.execute("""SELECT u.username FROM friend_requests r
@@ -569,7 +569,7 @@ def get_messages():
     except ValueError:return jsonify(error='Ami invalide.'),400
     with db() as con:
         if not are_friends(con,user['id'],other):return jsonify(error='Tu dois être ami avec ce joueur.'),403
-        rows=con.execute("""SELECT m.id,m.sender_id,m.recipient_id,m.body,m.created_at,u.username
+        rows=con.execute("""SELECT m.id,m.sender_id,m.recipient_id,m.body,m.created_at,u.username,u.avatar_data
             FROM direct_messages m JOIN users u ON u.id=m.sender_id
             WHERE (m.sender_id=? AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=?)
             ORDER BY m.created_at DESC,m.id DESC LIMIT 100""",(user['id'],other,other,user['id'])).fetchall()
@@ -643,7 +643,7 @@ def get_message_group(group_id):
     with db() as con:
         member=con.execute('SELECT 1 FROM group_members WHERE conversation_id=? AND user_id=?',(group_id,user['id'])).fetchone()
         if not member:return jsonify(error='Tu ne fais pas partie de ce groupe.'),403
-        rows=con.execute("""SELECT m.id,m.sender_id,m.body,m.created_at,u.username
+        rows=con.execute("""SELECT m.id,m.sender_id,m.body,m.created_at,u.username,u.avatar_data
             FROM group_messages m JOIN users u ON u.id=m.sender_id WHERE m.conversation_id=?
             ORDER BY m.created_at DESC,m.id DESC LIMIT 100""",(group_id,)).fetchall()
     return jsonify(messages=[dict(r) for r in reversed(rows)])
@@ -727,7 +727,7 @@ def get_club_messages(club_id):
     with db() as con:
         member=con.execute('SELECT 1 FROM club_members WHERE club_id=? AND user_id=?',(club_id,user['id'])).fetchone()
         if not member:return jsonify(error='Tu dois rejoindre ce club.'),403
-        rows=con.execute("""SELECT m.id,m.body,m.created_at,m.user_id,u.username
+        rows=con.execute("""SELECT m.id,m.body,m.created_at,m.user_id,u.username,u.avatar_data
             FROM club_messages m JOIN users u ON u.id=m.user_id WHERE m.club_id=?
             ORDER BY m.created_at DESC,m.id DESC LIMIT 100""",(club_id,)).fetchall()
     return jsonify(messages=[dict(r) for r in reversed(rows)])
@@ -753,13 +753,13 @@ def admin_overview():
     actor, error = staff_required()
     if error: return error
     with db() as con:
-        users = con.execute("""SELECT id,username,role,is_banned,ban_reason,created_at
+        users = con.execute("""SELECT id,username,avatar_data,role,is_banned,ban_reason,created_at
             FROM users ORDER BY lower(username) LIMIT 300""").fetchall()
-        scores = con.execute("""SELECT s.id,s.user_id,u.username,s.clicks,s.duration,s.cps,s.created_at
+        scores = con.execute("""SELECT s.id,s.user_id,u.username,s.clicks,s.duration,s.cps,s.created_at,u.avatar_data
             FROM scores s JOIN users u ON u.id=s.user_id ORDER BY s.created_at DESC LIMIT 100""").fetchall()
         if actor['role'] in ('admin','creator'):
             pending = con.execute("""SELECT r.id,r.action,r.target_user_id,r.score_id,r.reason,r.created_at,
-                req.username AS requester,target.username AS target
+                req.username AS requester,req.avatar_data AS requester_avatar,target.username AS target,target.avatar_data AS target_avatar
                 FROM admin_requests r JOIN users req ON req.id=r.requester_id
                 LEFT JOIN users target ON target.id=r.target_user_id
                 WHERE r.status='pending' ORDER BY r.created_at ASC LIMIT 100""").fetchall()
