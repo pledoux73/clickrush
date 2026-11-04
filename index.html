@@ -30,7 +30,7 @@
 <div id="authLayer" class="hidden" style="position:fixed;inset:0;background:#050916dd;z-index:5;padding:18px;overflow:auto"><div class="panel auth"><div class="brand">CLICK<span>RUSH</span> ⚡</div><h2 id="authTitle">Connexion</h2><div class="field"><label for="username">Pseudo</label><input id="username" maxlength="18" autocomplete="username" placeholder="TonPseudo"></div><div class="field"><label for="password">Mot de passe</label><input id="password" type="password" autocomplete="current-password" placeholder="8 caractères minimum"></div><div class="auth-actions"><button id="authSubmit" onclick="submitAuth()">Se connecter</button><button class="ghost" onclick="hideAuth()">Fermer</button></div><p class="note" id="authSwitch">Pas encore de compte ? <a href="#" onclick="toggleAuth();return false" style="color:var(--cyan)">Créer un compte</a></p><div class="notice" id="authNotice"></div></div></div>
 <div id="profileLayer" class="hidden" style="position:fixed;inset:0;background:#050916dd;z-index:6;padding:18px;overflow:auto"><div class="panel auth"><div class="brand">CLICK<span>RUSH</span> ⚡</div><h2>Modifier mon profil</h2><div style="display:flex;justify-content:center;margin:18px"><div id="avatarPreview" class="avatar" style="width:110px;height:110px">👤</div></div><div class="field"><label for="avatarFile">Photo de profil</label><input id="avatarFile" type="file" accept="image/png,image/jpeg,image/webp"></div><div class="field"><label for="profileUsername">Pseudo</label><input id="profileUsername" maxlength="18" autocomplete="nickname"></div><div class="auth-actions"><button onclick="saveProfile()">Enregistrer</button><button class="ghost" onclick="hideProfile()">Annuler</button></div><div class="notice" id="profileNotice" aria-live="polite"></div><p class="note">Photo JPG, PNG ou WEBP. Elle sera réduite automatiquement.</p></div></div>
 <script>
-let csrf='', user=null, selectedDuration=10, boardDuration=10, running=false, finished=false, clicks=0, startedAt=0, endAt=0, raf=0, mode='login', gameToken=null, startingGame=false;
+let csrf='', user=null, selectedDuration=10, boardDuration=10, running=false, finished=false, clicks=0, startedAt=0, endAt=0, raf=0, mode='login';
 const $=id=>document.getElementById(id);
 async function api(url, options={}){const res=await fetch(url,{...options,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,...(options.headers||{})}});let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.error||'Une erreur est survenue.');return data}
 async function init(){try{const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;user=s.user;renderUser(s);loadBoard();refreshSocial();loadAdmin();}catch(e){$('leaderboard').textContent='Impossible de contacter le serveur.'}}
@@ -188,34 +188,21 @@ function toggleAuth(){mode=mode==='login'?'register':'login';$('authNotice').tex
 function updateAuth(){$('authTitle').textContent=mode==='login'?'Connexion':'Créer un compte';$('authSubmit').textContent=mode==='login'?'Se connecter':'Créer mon compte';$('password').autocomplete=mode==='login'?'current-password':'new-password';$('authSwitch').innerHTML=mode==='login'?'Pas encore de compte ? <a href="#" onclick="toggleAuth();return false" style="color:var(--cyan)">Créer un compte</a>':'Déjà un compte ? <a href="#" onclick="toggleAuth();return false" style="color:var(--cyan)">Se connecter</a>'}
 async function submitAuth(){const username=$('username').value.trim(),password=$('password').value;$('authNotice').textContent='';try{await api('/api/'+mode,{method:'POST',body:JSON.stringify({username,password})});hideAuth();const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;user=s.user;renderUser(s);refreshSocial();loadAdmin();$('gameNotice').textContent='Connecté ! Tes prochains scores seront sauvegardés.';}catch(e){$('authNotice').textContent=e.message}}
 async function logout(){try{await api('/api/logout',{method:'POST'});user=null;$('adminPanel').classList.add('hidden');const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;renderUser(s);refreshSocial();loadAdmin()}catch(e){$('gameNotice').textContent=e.message}}
-$('durations').addEventListener('click',e=>{const b=e.target.closest('button[data-time]');if(!b||running||startingGame)return;selectedDuration=Number(b.dataset.time);$('durations').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));resetGame()});
+$('durations').addEventListener('click',e=>{const b=e.target.closest('button[data-time]');if(!b||running)return;selectedDuration=Number(b.dataset.time);$('durations').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));resetGame()});
 $('boardTabs').addEventListener('click',e=>{const b=e.target.closest('button[data-time]');if(!b)return;boardDuration=Number(b.dataset.time);$('boardTabs').querySelectorAll('button').forEach(x=>{x.classList.toggle('active',x===b);x.classList.toggle('secondary',x!==b)});loadBoard()});
-function resetGame(){running=false;finished=false;startingGame=false;gameToken=null;clicks=0;cancelAnimationFrame(raf);$('clicks').textContent='0';$('cps').textContent='0.00';$('timer').textContent=selectedDuration.toFixed(1);$('arenaTitle').textContent='CLIQUE ICI !';$('arenaSub').textContent='Appuie pour commencer';$('gameNotice').textContent='';$('replayBtn').classList.add('hidden')}
-async function tap(){
-  // Une fois le test terminé, les clics sont ignorés. Le serveur ouvre d'abord une session signée.
-  if(finished||startingGame)return;
+function resetGame(){running=false;finished=false;clicks=0;cancelAnimationFrame(raf);$('clicks').textContent='0';$('cps').textContent='0.00';$('timer').textContent=selectedDuration.toFixed(1);$('arenaTitle').textContent='CLIQUE ICI !';$('arenaSub').textContent='Appuie pour commencer';$('gameNotice').textContent='';$('replayBtn').classList.add('hidden')}
+function tap(){
+  // Une fois le test terminé, les clics sont ignorés. Seul « Rejouer » réinitialise le test.
+  if(finished)return;
+  const now=performance.now();
   if(!running){
-    startingGame=true;
-    if(user){
-      try{
-        const sessionData=await api('/api/game/start',{method:'POST',body:JSON.stringify({duration:selectedDuration})});
-        gameToken=sessionData.game_token;
-      }catch(e){
-        $('gameNotice').textContent=e.message;
-        startingGame=false;
-        return;
-      }
-    }
-    startingGame=false;
-    if(finished||running)return;
     running=true;
-    startedAt=performance.now();
+    startedAt=now;
     endAt=startedAt+selectedDuration*1000;
     $('arenaTitle').textContent='CLIQUE !';
     $('arenaSub').textContent='Continue le plus vite possible';
     tick();
   }
-  const now=performance.now();
   if(now>=endAt){finish();return}
   clicks++;
   $('clicks').textContent=clicks;
@@ -235,8 +222,7 @@ async function finish(){
   $('replayBtn').classList.remove('hidden');
   if(user){
     try{
-      if(!gameToken)throw new Error('Session anti-triche absente. Relance une partie.');
-      await api('/api/score',{method:'POST',body:JSON.stringify({clicks,duration:selectedDuration,game_token:gameToken})});
+      await api('/api/score',{method:'POST',body:JSON.stringify({clicks,duration:selectedDuration})});
       const s=await fetch('/api/state').then(r=>r.json());
       boardCache.clear();
       csrf=s.csrf;user=s.user;renderUser(s);loadBoard();
