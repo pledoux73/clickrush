@@ -202,8 +202,8 @@ function normalizeReplayKey(key){let k=String(key||'').toUpperCase();if(k.starts
 function paintReplay(time){
  if(!$('replayViewer'))return;const progress=Math.min(1,time/window.replayDuration);$('replayProgress').style.width=(progress*100)+'%';$('replayClock').textContent=(time/1000).toFixed(2)+' / '+(window.replayDuration/1000).toFixed(2)+' s';
  document.querySelectorAll('#replayKeyboard .replay-key').forEach(k=>k.classList.remove('active'));$('replayMouseLeft').classList.remove('active');$('replayMouseRight').classList.remove('active');const passed=gameReplay.slice(0,window.replayIndex);$('replayArena').textContent=passed.filter(e=>e.type==='click').length+' / '+(window.replayTotalClicks||0)+' clics';
- passed.filter(e=>e.type==='key'&&time-Number(e.t)<240).forEach(e=>{const key=normalizeReplayKey(e.key);const el=Array.from(document.querySelectorAll('#replayKeyboard .replay-key')).find(x=>x.dataset.key===key);if(el)el.classList.add('active')});
- const lastClick=passed.slice().reverse().find(e=>e.type==='click'&&time-Number(e.t)<180);if(lastClick)$('replayMouseLeft').classList.add('active');
+ passed.filter(e=>{const age=time-Number(e.t);return e.type==='key'&&age>=0&&age<240}).forEach(e=>{const key=normalizeReplayKey(e.key);const el=Array.from(document.querySelectorAll('#replayKeyboard .replay-key')).find(x=>x.dataset.key===key);if(el)el.classList.add('active')});
+ const lastClick=passed.slice().reverse().find(e=>{const age=time-Number(e.t);return e.type==='click'&&age>=0&&age<180});if(lastClick)$('replayMouseLeft').classList.add('active');
 }
 function startAdminReplay(){
  if(!gameReplay.length)return;pauseAdminReplay();if(window.replayElapsed>=window.replayDuration){window.replayElapsed=0;window.replayIndex=0}window.replayStart=performance.now()-window.replayElapsed;
