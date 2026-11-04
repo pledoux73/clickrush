@@ -143,6 +143,7 @@ def init_db():
             con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT FALSE")
             con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT")
             con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ip_hash TEXT")
+            con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS anti_cheat_strikes INTEGER NOT NULL DEFAULT 0")
             con.execute("""CREATE TABLE IF NOT EXISTS admin_settings (
                 id INTEGER PRIMARY KEY, creator_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL)""")
             con.execute("""CREATE TABLE IF NOT EXISTS admin_requests (
@@ -157,6 +158,7 @@ def init_db():
             if 'is_banned' not in columns: con.execute("ALTER TABLE users ADD COLUMN is_banned INTEGER NOT NULL DEFAULT 0")
             if 'ban_reason' not in columns: con.execute("ALTER TABLE users ADD COLUMN ban_reason TEXT")
             if 'ip_hash' not in columns: con.execute("ALTER TABLE users ADD COLUMN ip_hash TEXT")
+            if 'anti_cheat_strikes' not in columns: con.execute("ALTER TABLE users ADD COLUMN anti_cheat_strikes INTEGER NOT NULL DEFAULT 0")
             con.execute("""CREATE TABLE IF NOT EXISTS admin_settings (
                 id INTEGER PRIMARY KEY, creator_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL)""")
             con.execute("""CREATE TABLE IF NOT EXISTS admin_requests (
@@ -380,6 +382,16 @@ def update_profile():
         raise
     return jsonify(ok=True)
 
+def add_anti_cheat_strike(con, user_id, reason):
+    con.execute('UPDATE users SET anti_cheat_strikes=anti_cheat_strikes+1 WHERE id=?', (user_id,))
+    row = con.execute('SELECT anti_cheat_strikes FROM users WHERE id=?', (user_id,)).fetchone()
+    strikes = int(row['anti_cheat_strikes']) if row else 0
+    if strikes >= 3:
+        con.execute('UPDATE users SET is_banned=?,ban_reason=? WHERE id=?',
+            (True if con.postgres else 1, 'Bannissement automatique anti-triche : ' + reason[:200], user_id))
+    return strikes
+
+
 @app.post('/api/score')
 def save_score():
     bad = require_csrf()
@@ -400,11 +412,19 @@ def save_score():
         previous = con.execute('SELECT created_at FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 1',
             (user['id'],)).fetchone()
         if previous and now - int(previous['created_at']) < max(3, duration - 1):
-            return jsonify(error='Score refusé : délai anormal entre deux parties.'), 429
-        # Au-delà de 20 CPS, le résultat est refusé (suspicion d'autoclicker).
-        # Pas de bannissement automatique sur un seul score atypique.
+            strikes = add_anti_cheat_strike(con, user['id'], 'parties envoyées trop rapidement')
+            if strikes >= 3:
+                session.clear()
+                return jsonify(error='Compte banni automatiquement après plusieurs tentatives de triche.'), 403
+            return jsonify(error='Score refusé : délai anormal entre deux parties ('+str(strikes)+'/3 avertissements).'), 429
+        # Au-delà de 20 CPS, le résultat est refusé. Trois infractions
+        # détectées entraînent une suspension automatique.
         if cps > 20:
-            return jsonify(error='Score refusé : cadence anormalement élevée, vérification anti-triche.'), 400
+            strikes = add_anti_cheat_strike(con, user['id'], 'cadence de clics supérieure à 20 CPS')
+            if strikes >= 3:
+                session.clear()
+                return jsonify(error='Compte banni automatiquement après plusieurs tentatives de triche.'), 403
+            return jsonify(error='Score refusé : cadence anormalement élevée ('+str(strikes)+'/3 avertissements).'), 400
         con.execute('INSERT INTO scores(user_id,clicks,duration,cps,created_at) VALUES(?,?,?,?,?)',
             (user['id'], clicks, duration, cps, now))
     return jsonify(ok=True, cps=cps)
