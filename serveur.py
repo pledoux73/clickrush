@@ -12,7 +12,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_SECURE=bool(DATABASE_URL) or os.environ.get('COOKIE_SECURE') == '1',
-    MAX_CONTENT_LENGTH=16 * 1024,
+    MAX_CONTENT_LENGTH=1_500_000,
 )
 
 # PostgreSQL sur l'hébergeur ; SQLite automatiquement pour les essais sur le PC.
@@ -64,6 +64,12 @@ def init_db():
             con.execute('''CREATE TABLE IF NOT EXISTS scores (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 clicks INTEGER NOT NULL, duration INTEGER NOT NULL, cps REAL NOT NULL, created_at INTEGER NOT NULL)''')
+        if con.postgres:
+            con.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data TEXT')
+        else:
+            columns = [row['name'] for row in con.execute('PRAGMA table_info(users)').fetchall()]
+            if 'avatar_data' not in columns:
+                con.execute('ALTER TABLE users ADD COLUMN avatar_data TEXT')
         con.execute('CREATE INDEX IF NOT EXISTS idx_scores_cps ON scores(cps DESC)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_scores_user ON scores(user_id, created_at DESC)')
 
@@ -71,7 +77,7 @@ def current_user():
     uid = session.get('user_id')
     if not uid: return None
     with db() as con:
-        row = con.execute('SELECT id, username, created_at FROM users WHERE id=?', (uid,)).fetchone()
+        row = con.execute('SELECT id, username, created_at, avatar_data FROM users WHERE id=?', (uid,)).fetchone()
     return dict(row) if row else None
 
 def require_csrf():
@@ -147,6 +153,45 @@ def logout():
     bad = require_csrf()
     if bad: return bad
     session.clear(); return jsonify(ok=True)
+
+@app.post('/api/profile')
+def update_profile():
+    bad = require_csrf()
+    if bad: return bad
+    user = current_user()
+    if not user: return jsonify(error='Connecte-toi pour modifier ton profil.'), 401
+    data = request.get_json(silent=True) or {}
+    username = str(data.get('username', '')).strip()
+    if not re.fullmatch(r'[A-Za-z0-9_]{3,18}', username):
+        return jsonify(error='Le pseudo doit contenir 3 à 18 caractères : lettres, chiffres ou _.'), 400
+    avatar_data = data.get('avatar', user.get('avatar_data'))
+    if avatar_data is not None:
+        avatar_data = str(avatar_data)
+        match = re.fullmatch(r'data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})', avatar_data)
+        if not match or len(avatar_data) > 1_100_000:
+            return jsonify(error='Photo invalide ou trop volumineuse.'), 400
+        import base64
+        try:
+            raw = base64.b64decode(match.group(2), validate=True)
+        except Exception:
+            return jsonify(error='Le fichier image est invalide.'), 400
+        if len(raw) > 800_000:
+            return jsonify(error='La photo doit faire moins de 800 Ko après compression.'), 400
+        kind = match.group(1)
+        valid = (kind == 'jpeg' and raw.startswith(bytes([255,216,255]))) or (kind == 'png' and raw.startswith(bytes([137,80,78,71,13,10,26,10]))) or (kind == 'webp' and raw[:4] == b'RIFF' and raw[8:12] == b'WEBP')
+        if not valid:
+            return jsonify(error='Le contenu du fichier ne correspond pas à une image valide.'), 400
+    try:
+        with db() as con:
+            duplicate = con.execute('SELECT id FROM users WHERE lower(username)=lower(?) AND id<>?', (username, user['id'])).fetchone()
+            if duplicate:
+                return jsonify(error='Ce pseudo est déjà utilisé.'), 409
+            con.execute('UPDATE users SET username=?, avatar_data=? WHERE id=?', (username, avatar_data, user['id']))
+    except Exception as exc:
+        if 'unique' in str(exc).lower() or 'duplicate' in str(exc).lower():
+            return jsonify(error='Ce pseudo est déjà utilisé.'), 409
+        raise
+    return jsonify(ok=True)
 
 @app.post('/api/score')
 def save_score():
