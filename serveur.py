@@ -68,20 +68,34 @@ def init_db():
             con.execute('''CREATE TABLE IF NOT EXISTS scores (
                 id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 clicks INTEGER NOT NULL, duration INTEGER NOT NULL, cps DOUBLE PRECISION NOT NULL,
-                created_at BIGINT NOT NULL)''')
+                created_at BIGINT NOT NULL, auto_status TEXT NOT NULL DEFAULT 'clear', auto_reason TEXT NOT NULL DEFAULT '', click_pattern TEXT NOT NULL DEFAULT '')''')
         else:
             con.execute('''CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL COLLATE NOCASE UNIQUE,
                 password_hash TEXT NOT NULL, created_at INTEGER NOT NULL)''')
             con.execute('''CREATE TABLE IF NOT EXISTS scores (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                clicks INTEGER NOT NULL, duration INTEGER NOT NULL, cps REAL NOT NULL, created_at INTEGER NOT NULL)''')
+                clicks INTEGER NOT NULL, duration INTEGER NOT NULL, cps REAL NOT NULL, created_at INTEGER NOT NULL,
+                auto_status TEXT NOT NULL DEFAULT 'clear', auto_reason TEXT NOT NULL DEFAULT '', click_pattern TEXT NOT NULL DEFAULT '')''')
         if con.postgres:
             con.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data TEXT')
+            con.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS auto_status TEXT NOT NULL DEFAULT 'clear'")
+            con.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS auto_reason TEXT NOT NULL DEFAULT ''")
+            con.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS click_pattern TEXT NOT NULL DEFAULT ''")
+            con.execute('''CREATE TABLE IF NOT EXISTS player_notifications (
+                id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                body TEXT NOT NULL, created_at BIGINT NOT NULL, seen BOOLEAN NOT NULL DEFAULT FALSE)''')
         else:
             columns = [row['name'] for row in con.execute('PRAGMA table_info(users)').fetchall()]
             if 'avatar_data' not in columns:
                 con.execute('ALTER TABLE users ADD COLUMN avatar_data TEXT')
+            score_columns = [row['name'] for row in con.execute('PRAGMA table_info(scores)').fetchall()]
+            if 'auto_status' not in score_columns: con.execute("ALTER TABLE scores ADD COLUMN auto_status TEXT NOT NULL DEFAULT 'clear'")
+            if 'auto_reason' not in score_columns: con.execute("ALTER TABLE scores ADD COLUMN auto_reason TEXT NOT NULL DEFAULT ''")
+            if 'click_pattern' not in score_columns: con.execute("ALTER TABLE scores ADD COLUMN click_pattern TEXT NOT NULL DEFAULT ''")
+            con.execute('''CREATE TABLE IF NOT EXISTS player_notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                body TEXT NOT NULL, created_at INTEGER NOT NULL, seen INTEGER NOT NULL DEFAULT 0)''')
         con.execute('CREATE INDEX IF NOT EXISTS idx_scores_cps ON scores(cps DESC)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_scores_user ON scores(user_id, created_at DESC)')
         if con.postgres:
@@ -299,6 +313,10 @@ def state():
         user['avatar_data'] = profile['avatar_data'] if profile else None
         result['stats'] = {'best': round(best['best'] or 0, 2), 'total': best['total']}
         result['history'] = [dict(r) for r in recent]
+            notices = con.execute('SELECT id,body,created_at FROM player_notifications WHERE user_id=? AND seen=? ORDER BY created_at DESC LIMIT 5', (user['id'], False if con.postgres else 0)).fetchall()
+            result['notifications'] = [dict(r) for r in notices]
+            if notices:
+                con.execute('UPDATE player_notifications SET seen=? WHERE user_id=?', (True if con.postgres else 1, user['id']))
     return jsonify(result)
 
 @app.post('/api/register')
@@ -447,16 +465,22 @@ def save_score():
                 session.clear()
                 return jsonify(error='Compte banni automatiquement après plusieurs tentatives de triche.'), 403
             return jsonify(error='Score refusé : délai anormal entre deux parties ('+str(strikes)+'/3 avertissements).'), 429
-        # Au-delà de 20 CPS, le résultat est refusé. Trois infractions
-        # détectées entraînent une suspension automatique.
-        if cps > 20:
-            strikes = add_anti_cheat_strike(con, user['id'], 'cadence de clics supérieure à 20 CPS')
-            if strikes >= 3:
-                session.clear()
-                return jsonify(error='Compte banni automatiquement après plusieurs tentatives de triche.'), 403
-            return jsonify(error='Score refusé : cadence anormalement élevée ('+str(strikes)+'/3 avertissements).'), 400
-        con.execute('INSERT INTO scores(user_id,clicks,duration,cps,created_at) VALUES(?,?,?,?,?)',
-            (user['id'], clicks, duration, cps, now))
+        # Les scores suspects sont conservés pour l'historique de modération.
+        # Le bouton Auto filtre applique ensuite les sanctions et avertissements.
+        intervals = data.get('intervals', [])
+        if not isinstance(intervals, list) or len(intervals) > 2000:
+            return jsonify(error='Données de cadence invalides.'), 400
+        clean_intervals = []
+        for value in intervals:
+            try:
+                number = float(value)
+                if not (0 < number <= 5000): raise ValueError()
+                clean_intervals.append(round(number, 2))
+            except (TypeError, ValueError):
+                return jsonify(error='Données de cadence invalides.'), 400
+        pattern = ','.join(str(x) for x in clean_intervals)
+        con.execute('INSERT INTO scores(user_id,clicks,duration,cps,created_at,click_pattern) VALUES(?,?,?,?,?,?)',
+            (user['id'], clicks, duration, cps, now, pattern))
     return jsonify(ok=True, cps=cps)
 
 @app.get('/api/leaderboard')
@@ -748,6 +772,48 @@ def send_club_message(club_id):
     return jsonify(ok=True)
 
 
+@app.post('/api/admin/auto-filter')
+def admin_auto_filter():
+    bad = require_csrf()
+    if bad: return bad
+    actor, error = staff_required()
+    if error: return error
+    if actor['role'] not in ('admin', 'creator'):
+        return jsonify(error='Seuls les admins peuvent lancer le filtre automatique.'), 403
+    processed = {'cheat': 0, 'suspect': 0, 'clear': 0}
+    with db() as con:
+        rows = con.execute("""SELECT s.id,s.user_id,s.cps,s.click_pattern,u.role,u.username
+            FROM scores s JOIN users u ON u.id=s.user_id
+            WHERE s.auto_status='clear' ORDER BY s.created_at DESC LIMIT 200""").fetchall()
+        for row in rows:
+            try:
+                gaps = [float(x) for x in (row['click_pattern'] or '').split(',') if x]
+            except ValueError:
+                gaps = []
+            mean = sum(gaps) / len(gaps) if gaps else 0
+            cv = 0
+            if len(gaps) >= 10 and mean > 0:
+                variance = sum((x-mean)**2 for x in gaps) / len(gaps)
+                cv = (variance ** 0.5) / mean
+            cheat = float(row['cps']) > 20 or (len(gaps) >= 14 and 35 <= mean <= 180 and cv < 0.018)
+            suspect = not cheat and (float(row['cps']) >= 15 or (len(gaps) >= 10 and 35 <= mean <= 180 and cv < 0.06))
+            if cheat and row['role'] not in ('creator', 'admin'):
+                status, reason = 'cheat', 'Cadence de clics incompatible avec un jeu manuel.'
+                con.execute('UPDATE users SET is_banned=?,ban_reason=? WHERE id=?',
+                    (True if con.postgres else 1, reason, row['user_id']))
+                processed['cheat'] += 1
+            elif suspect:
+                status, reason = 'suspect', 'Cadence inhabituelle : vérification recommandée.'
+                con.execute('INSERT INTO player_notifications(user_id,body,created_at) VALUES(?,?,?)',
+                    (row['user_id'], 'Avertissement ClickRush : une de tes parties a été signalée comme suspecte. Joue uniquement avec des clics manuels.', int(time.time())))
+                processed['suspect'] += 1
+            else:
+                status, reason = 'clear', ''
+                processed['clear'] += 1
+            con.execute('UPDATE scores SET auto_status=?,auto_reason=? WHERE id=?',
+                (status, reason, row['id']))
+    return jsonify(ok=True, processed=processed)
+
 @app.get('/api/admin')
 def admin_overview():
     actor, error = staff_required()
@@ -755,7 +821,7 @@ def admin_overview():
     with db() as con:
         users = con.execute("""SELECT id,username,avatar_data,role,is_banned,ban_reason,created_at
             FROM users ORDER BY lower(username) LIMIT 300""").fetchall()
-        scores = con.execute("""SELECT s.id,s.user_id,u.username,s.clicks,s.duration,s.cps,s.created_at,u.avatar_data
+        scores = con.execute("""SELECT s.id,s.user_id,u.username,s.clicks,s.duration,s.cps,s.created_at,u.avatar_data,s.auto_status,s.auto_reason
             FROM scores s JOIN users u ON u.id=s.user_id ORDER BY s.created_at DESC LIMIT 100""").fetchall()
         if actor['role'] in ('admin','creator'):
             pending = con.execute("""SELECT r.id,r.action,r.target_user_id,r.score_id,r.reason,r.created_at,
@@ -779,7 +845,7 @@ def admin_history(target_id):
     with db() as con:
         target=con.execute('SELECT id,username,avatar_data,role,is_banned,created_at FROM users WHERE id=?',(target_id,)).fetchone()
         if not target:return jsonify(error='Joueur introuvable.'),404
-        rows=con.execute('SELECT id,clicks,duration,cps,created_at FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 200',(target_id,)).fetchall()
+        rows=con.execute('SELECT id,clicks,duration,cps,created_at,auto_status,auto_reason FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 200',(target_id,)).fetchall()
     return jsonify(user=dict(target),history=[dict(r) for r in rows])
 
 @app.post('/api/admin/action')
