@@ -214,7 +214,7 @@ def apply_staff_action(con, actor, action, target_id=None, score_id=None, reason
     if action == 'delete_score':
         score = con.execute('SELECT s.id,u.id AS user_id,u.role FROM scores s JOIN users u ON u.id=s.user_id WHERE s.id=?', (score_id,)).fetchone()
         if not score: return 'Score introuvable.'
-        if score['user_id'] == actor['id']: return 'Tu ne peux pas supprimer tes propres scores.'
+        if score['user_id'] == actor['id'] and actor['role'] != 'creator': return 'Tu ne peux pas supprimer tes propres scores.'
         if protected_from(actor, score): return 'Tu ne peux pas supprimer les scores de ce compte.'
         con.execute('DELETE FROM scores WHERE id=?', (score_id,))
         return None
@@ -586,11 +586,18 @@ def admin_overview():
             FROM users ORDER BY lower(username) LIMIT 300""").fetchall()
         scores = con.execute("""SELECT s.id,s.user_id,u.username,s.clicks,s.duration,s.cps,s.created_at
             FROM scores s JOIN users u ON u.id=s.user_id ORDER BY s.created_at DESC LIMIT 100""").fetchall()
-        pending = con.execute("""SELECT r.id,r.action,r.target_user_id,r.score_id,r.reason,r.created_at,
-            req.username AS requester,target.username AS target
-            FROM admin_requests r JOIN users req ON req.id=r.requester_id
-            LEFT JOIN users target ON target.id=r.target_user_id
-            WHERE r.status='pending' ORDER BY r.created_at ASC LIMIT 100""").fetchall()
+        if actor['role'] in ('admin','creator'):
+            pending = con.execute("""SELECT r.id,r.action,r.target_user_id,r.score_id,r.reason,r.created_at,
+                req.username AS requester,target.username AS target
+                FROM admin_requests r JOIN users req ON req.id=r.requester_id
+                LEFT JOIN users target ON target.id=r.target_user_id
+                WHERE r.status='pending' ORDER BY r.created_at ASC LIMIT 100""").fetchall()
+        else:
+            pending = con.execute("""SELECT r.id,r.action,r.target_user_id,r.score_id,r.reason,r.created_at,
+                req.username AS requester,target.username AS target
+                FROM admin_requests r JOIN users req ON req.id=r.requester_id
+                LEFT JOIN users target ON target.id=r.target_user_id
+                WHERE r.status='pending' AND r.requester_id=? ORDER BY r.created_at ASC LIMIT 100""",(actor['id'],)).fetchall()
     return jsonify(role=actor['role'],users=[dict(r) for r in users],
         scores=[dict(r) for r in scores],requests=[dict(r) for r in pending])
 
@@ -629,7 +636,7 @@ def admin_action():
             if action=='delete_score':
                 score=con.execute('SELECT s.id,u.id AS user_id,u.role FROM scores s JOIN users u ON u.id=s.user_id WHERE s.id=?',(score_id,)).fetchone()
                 if not score:return jsonify(error='Score introuvable.'),404
-                if score['user_id']==actor['id'] or protected_from(actor,score):return jsonify(error='Action interdite sur ce score.'),403
+                if (score['user_id']==actor['id'] and actor['role']!='creator') or protected_from(actor,score):return jsonify(error='Action interdite sur ce score.'),403
             con.execute("""INSERT INTO admin_requests(requester_id,action,target_user_id,score_id,reason,status,created_at)
                 VALUES(?,?,?,?,?,'pending',?)""",(actor['id'],action,target_id,score_id,reason,int(time.time())))
         return jsonify(ok=True,pending_approval=True)
