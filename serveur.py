@@ -312,13 +312,13 @@ def state():
             profile = con.execute('SELECT avatar_data FROM users WHERE id=?', (user['id'],)).fetchone()
             best = con.execute('SELECT MAX(cps) AS best, COUNT(*) AS total FROM scores WHERE user_id=?', (user['id'],)).fetchone()
             recent = con.execute('SELECT clicks, duration, cps, created_at FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 10', (user['id'],)).fetchall()
-        user['avatar_data'] = profile['avatar_data'] if profile else None
-        result['stats'] = {'best': round(best['best'] or 0, 2), 'total': best['total']}
-            result['history'] = [dict(r) for r in recent]
             notices = con.execute('SELECT id,body,created_at FROM player_notifications WHERE user_id=? AND seen=? ORDER BY created_at DESC LIMIT 5', (user['id'], False if con.postgres else 0)).fetchall()
-            result['notifications'] = [dict(r) for r in notices]
             if notices:
                 con.execute('UPDATE player_notifications SET seen=? WHERE user_id=?', (True if con.postgres else 1, user['id']))
+        user['avatar_data'] = profile['avatar_data'] if profile else None
+        result['stats'] = {'best': round(best['best'] or 0, 2), 'total': best['total']}
+        result['history'] = [dict(r) for r in recent]
+        result['notifications'] = [dict(r) for r in notices]
     return jsonify(result)
 
 @app.post('/api/register')
