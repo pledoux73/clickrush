@@ -174,6 +174,7 @@ def init_db():
                 duration INTEGER NOT NULL, started_at BIGINT NOT NULL,
                 expires_at BIGINT NOT NULL, used_at BIGINT)""")
             con.execute('CREATE INDEX IF NOT EXISTS idx_game_sessions_user ON game_sessions(user_id,started_at DESC)')
+            con.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_game_sessions_one_open ON game_sessions(user_id) WHERE used_at IS NULL')
             con.execute("""CREATE TABLE IF NOT EXISTS game_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, token_hash TEXT NOT NULL UNIQUE,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -495,7 +496,9 @@ def save_score():
             strikes = add_anti_cheat_strike(con, user['id'], 'session terminée hors délai')
             return jsonify(error='Score refusé : session expirée.'), 400
         # Consomme le jeton une seule fois avant d'enregistrer le résultat.
-        con.execute('UPDATE game_sessions SET used_at=? WHERE id=? AND used_at IS NULL', (now_ms, game['id']))
+        consumed = con.execute('UPDATE game_sessions SET used_at=? WHERE id=? AND used_at IS NULL', (now_ms, game['id']))
+        if consumed.rowcount != 1:
+            return jsonify(error='Score refusé : cette session a déjà été utilisée.'), 403
         # Un test normal dure au minimum la durée choisie. Cette vérification
         # bloque les envois répétés/fabriqués trop rapprochés.
         previous = con.execute('SELECT created_at FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 1',
