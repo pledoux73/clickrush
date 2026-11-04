@@ -18,14 +18,14 @@
 <div class="metrics"><div class="metric"><strong id="clicks">0</strong><span>Clics</span></div><div class="metric"><strong id="cps">0.00</strong><span>CPS</span></div><div class="metric"><strong id="timer">10.0</strong><span>Secondes</span></div></div><div class="notice" id="gameNotice" aria-live="polite"></div></main>
 <aside class="side"><section class="panel"><h2>🏆 Classement mondial</h2><div class="tabs" id="boardTabs"><button class="active" data-time="10">10s</button><button class="secondary" data-time="5">5s</button><button class="secondary" data-time="30">30s</button><button class="secondary" data-time="60">60s</button></div><div id="leaderboard" class="empty">Chargement…</div></section>
 <section class="panel"><h2>👤 Mon profil</h2><div id="profile"><p class="muted">Connecte-toi pour sauvegarder tes scores et consulter ton historique.</p><button onclick="showAuth('register')">Créer un compte</button></div></section><section class="panel"><h2>🤝 Amis & communautés</h2><div id="socialPanel"><p class="muted">Connecte-toi pour retrouver tes amis, discuter et rejoindre des clubs.</p></div></section></aside></div>
-<footer>ClickRush • Les scores sont enregistrés sur ce serveur.</footer></div>
+<section id="adminPanel" class="panel hidden" style="margin-top:22px"><h2>🛡️ Centre d'administration</h2><p class="muted" id="adminIntro">Outils de gestion ClickRush.</p><div class="social-block"><b>Joueurs</b><div class="social-form"><input id="adminSearch" placeholder="Rechercher un pseudo…" oninput="filterAdminUsers()"><button onclick="loadAdmin()">Actualiser</button></div><div id="adminUsers" class="social-list">Chargement…</div></div><div class="social-block"><b>Scores récents</b><div id="adminScores" class="social-list">Chargement…</div></div><div class="social-block"><b>Demandes des modérateurs</b><div id="adminRequests" class="social-list">Chargement…</div></div><div class="social-block"><b>Historique du joueur</b><div id="adminHistory" class="chat-box">Sélectionne « Historique » sur un joueur.</div></div></section>\n<footer>ClickRush • Les scores sont enregistrés sur ce serveur.</footer></div>
 <div id="authLayer" class="hidden" style="position:fixed;inset:0;background:#050916dd;z-index:5;padding:18px;overflow:auto"><div class="panel auth"><div class="brand">CLICK<span>RUSH</span> ⚡</div><h2 id="authTitle">Connexion</h2><div class="field"><label for="username">Pseudo</label><input id="username" maxlength="18" autocomplete="username" placeholder="TonPseudo"></div><div class="field"><label for="password">Mot de passe</label><input id="password" type="password" autocomplete="current-password" placeholder="8 caractères minimum"></div><div class="auth-actions"><button id="authSubmit" onclick="submitAuth()">Se connecter</button><button class="ghost" onclick="hideAuth()">Fermer</button></div><p class="note" id="authSwitch">Pas encore de compte ? <a href="#" onclick="toggleAuth();return false" style="color:var(--cyan)">Créer un compte</a></p><div class="notice" id="authNotice"></div></div></div>
 <div id="profileLayer" class="hidden" style="position:fixed;inset:0;background:#050916dd;z-index:6;padding:18px;overflow:auto"><div class="panel auth"><div class="brand">CLICK<span>RUSH</span> ⚡</div><h2>Modifier mon profil</h2><div style="display:flex;justify-content:center;margin:18px"><div id="avatarPreview" class="avatar" style="width:110px;height:110px">👤</div></div><div class="field"><label for="avatarFile">Photo de profil</label><input id="avatarFile" type="file" accept="image/png,image/jpeg,image/webp"></div><div class="field"><label for="profileUsername">Pseudo</label><input id="profileUsername" maxlength="18" autocomplete="nickname"></div><div class="auth-actions"><button onclick="saveProfile()">Enregistrer</button><button class="ghost" onclick="hideProfile()">Annuler</button></div><div class="notice" id="profileNotice" aria-live="polite"></div><p class="note">Photo JPG, PNG ou WEBP. Elle sera réduite automatiquement.</p></div></div>
 <script>
 let csrf='', user=null, selectedDuration=10, boardDuration=10, running=false, finished=false, clicks=0, startedAt=0, endAt=0, raf=0, mode='login';
 const $=id=>document.getElementById(id);
 async function api(url, options={}){const res=await fetch(url,{...options,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,...(options.headers||{})}});let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.error||'Une erreur est survenue.');return data}
-async function init(){try{const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;user=s.user;renderUser(s);loadBoard();refreshSocial();}catch(e){$('leaderboard').textContent='Impossible de contacter le serveur.'}}
+async function init(){try{const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;user=s.user;renderUser(s);loadBoard();refreshSocial();loadAdmin();}catch(e){$('leaderboard').textContent='Impossible de contacter le serveur.'}}
 function renderUser(s){$('welcome').textContent=user?'Salut, '+user.username:'Invité';$('authBtn').classList.toggle('hidden',!!user);$('registerBtn').classList.toggle('hidden',!!user);$('logoutBtn').classList.toggle('hidden',!user);if(!user){$('profile').innerHTML='<p class="muted">Connecte-toi pour sauvegarder tes scores et consulter ton historique.</p><button onclick="showAuth(\'register\')">Créer un compte</button>';return}const stats=s.stats||{best:0,total:0};let history=(s.history||[]).map(x=>'<div><span>'+x.clicks+' clics · '+x.duration+'s</span><b>'+Number(x.cps).toFixed(2)+' CPS</b></div>').join('')||'<p class="muted">Aucun score pour le moment.</p>';const avatar=user.avatar_data?'<img class="avatar" src="'+user.avatar_data+'" alt="Photo de profil">':'<div class="avatar">👤</div>';$('profile').innerHTML='<div class="profile-head">'+avatar+'<div><strong>'+escapeHtml(user.username)+'</strong><small class="muted">Joueur ClickRush</small></div></div><div class="profile-actions"><button class="secondary" onclick="showProfile()">✏️ Modifier mon profil</button></div><div class="profile-stats"><div><strong>'+stats.best.toFixed(2)+'</strong><small>Meilleur CPS</small></div><div><strong>'+stats.total+'</strong><small>Tests joués</small></div></div><h3 style="font-size:14px;margin:17px 0 5px">Derniers tests</h3><div class="history">'+history+'</div>'}
 let profileAvatarData=null;
 function showProfile(){if(!user)return;profileAvatarData=user.avatar_data||null;$('profileUsername').value=user.username;$('avatarFile').value='';$('avatarPreview').textContent='👤';$('avatarPreview').style.backgroundImage=profileAvatarData?'url("'+profileAvatarData+'")':'none';$('avatarPreview').style.backgroundSize='cover';$('avatarPreview').style.backgroundPosition='center';$('profileNotice').textContent='';$('profileLayer').classList.remove('hidden')}
@@ -65,12 +65,70 @@ async function openClub(id,name){activeClubId=id;activeClubName=name;activeFrien
 async function loadClubMessages(){if(clubLoading||document.hidden||!activeClubId)return;clubLoading=true;try{const d=await api("/api/clubs/"+activeClubId+"/messages");const el=$("clubMessages");if(!el)return;el.innerHTML=d.messages.map(m=>"<div class='chat-msg'><b>"+escapeHtml(m.username)+"</b> · "+new Date(m.created_at*1000).toLocaleString()+"<br>"+escapeHtml(m.body)+"</div>").join("")||"<span class='social-small'>Aucun message dans ce club.</span>";el.scrollTop=el.scrollHeight}catch(e){if($("clubMessages"))$("clubMessages").textContent=e.message}finally{clubLoading=false}}
 async function sendClubMessage(){const input=$("clubInput"),body=input.value.trim();if(!body)return;try{await api("/api/clubs/"+activeClubId+"/messages",{method:"POST",body:JSON.stringify({body})});input.value="";loadClubMessages()}catch(e){$("gameNotice").textContent=e.message}}
 
-function showAuth(startMode='login'){mode=startMode;$('authLayer').classList.remove('hidden');$('authNotice').textContent='';$('username').focus();updateAuth()}
+
+let adminSnapshot=null;
+async function loadAdmin(){
+ if(!user||!['creator','admin','mod'].includes(user.role))return;
+ $('adminPanel').classList.remove('hidden');
+ try{
+  const d=await api('/api/admin');adminSnapshot=d;
+  $('adminIntro').textContent=d.role==='creator'?'Créateur : tous les droits, y compris la gestion des administrateurs.':d.role==='admin'?'Administrateur : gestion des joueurs et validation des demandes.':'Modérateur : consultation et demandes d’intervention soumises aux administrateurs.';
+  renderAdminUsers();renderAdminScores();renderAdminRequests();
+ }catch(e){$('adminIntro').textContent=e.message}
+}
+function filterAdminUsers(){renderAdminUsers()}
+function renderAdminUsers(){
+ if(!adminSnapshot)return;
+ const q=($('adminSearch').value||'').toLowerCase();
+ const rows=adminSnapshot.users.filter(u=>u.username.toLowerCase().includes(q));
+ $('adminUsers').innerHTML=rows.map(u=>{
+  let actions='<button class="secondary" onclick="showAdminHistory('+u.id+')">Historique</button>';
+  if(u.id!==user.id && !(user.role==='admin'&&['creator','admin'].includes(u.role)) && u.role!=='creator'){
+   actions+=u.is_banned?'<button onclick="adminAction(\'unban\','+u.id+')">Débannir</button>':'<button class="ghost" onclick="adminAction(\'ban\','+u.id+')">Bannir</button>';
+  }
+  if(user.role==='creator'&&u.role!=='creator'){
+   actions+='<select aria-label="Rôle de '+escapeHtml(u.username)+'" onchange="setAdminRole('+u.id+',this.value)"><option value="user" '+(u.role==='user'?'selected':'')+'>Joueur</option><option value="mod" '+(u.role==='mod'?'selected':'')+'>Modo</option><option value="admin" '+(u.role==='admin'?'selected':'')+'>Admin</option></select>';
+  }
+  return '<div class="social-item"><span><b>'+escapeHtml(u.username)+'</b><br><small class="social-small">'+u.role.toUpperCase()+(u.is_banned?' · BANNI':'')+'</small></span><span>'+actions+'</span></div>';
+ }).join('')||'<span class="social-small">Aucun joueur trouvé.</span>';
+}
+function renderAdminScores(){
+ if(!adminSnapshot)return;
+ $('adminScores').innerHTML=adminSnapshot.scores.map(s=>{
+  const owner=adminSnapshot.users.find(u=>u.id===s.user_id);
+  const protectedUser=owner&&(owner.role==='creator'||(owner.role==='admin'&&user.role!=='creator'));
+  const own=owner&&owner.id===user.id;
+  const action=(!protectedUser&&!own&&user.role!=='mod')?'<button class="ghost" onclick="adminAction(\'delete_score\',null,'+s.id+')">Supprimer</button>':(!protectedUser&&!own&&user.role==='mod'?'<button class="secondary" onclick="adminAction(\'delete_score\',null,'+s.id+')">Demander suppression</button>':'');
+  return '<div class="social-item"><span><b>'+escapeHtml(s.username)+'</b><br><small class="social-small">#'+s.id+' · '+s.clicks+' clics / '+s.duration+'s · '+Number(s.cps).toFixed(2)+' CPS</small></span>'+action+'</div>';
+ }).join('')||'<span class="social-small">Aucun score.</span>';
+}
+function renderAdminRequests(){
+ if(!adminSnapshot)return;
+ $('adminRequests').innerHTML=adminSnapshot.requests.map(r=>'<div class="social-item"><span><b>'+escapeHtml(r.requester)+'</b> demande '+escapeHtml(r.action)+' '+(r.target||('score #'+r.score_id))+'<br><small class="social-small">'+escapeHtml(r.reason||'Sans motif')+'</small></span><span><button onclick="reviewAdminRequest('+r.id+',\'approve\')">Valider</button> <button class="ghost" onclick="reviewAdminRequest('+r.id+',\'reject\')">Refuser</button></span></div>').join('')||'<span class="social-small">Aucune demande en attente.</span>';
+}
+async function showAdminHistory(id){
+ try{const d=await api('/api/admin/history/'+id);$('adminHistory').innerHTML='<b>'+escapeHtml(d.user.username)+'</b> · '+d.history.length+' scores<br>'+d.history.map(s=>'<div class="chat-msg">#'+s.id+' · '+s.clicks+' clics · '+s.duration+'s · '+Number(s.cps).toFixed(2)+' CPS · '+new Date(s.created_at*1000).toLocaleString()+'</div>').join('')||'<p class="social-small">Aucun score enregistré.</p>'}catch(e){$('adminHistory').textContent=e.message}
+}
+async function adminAction(action,targetId=null,scoreId=null){
+ let reason='';
+ if(action==='ban'){reason=prompt('Motif du bannissement :')||'';if(!reason.trim())return}
+ if(!confirm(action==='ban'?'Confirmer le bannissement ?':action==='unban'?'Confirmer le débannissement ?':user.role==='mod'?'Envoyer une demande de suppression aux admins ?':'Supprimer définitivement ce score ?'))return;
+ try{const d=await api('/api/admin/action',{method:'POST',body:JSON.stringify({action,target_id:targetId,score_id:scoreId,reason})});alert(d.pending_approval?'Demande envoyée aux administrateurs.':'Action effectuée.');loadAdmin()}catch(e){alert(e.message)}
+}
+async function setAdminRole(id,role){
+ if(!confirm('Confirmer le changement de rôle ?')){loadAdmin();return}
+ try{await api('/api/admin/role',{method:'POST',body:JSON.stringify({target_id:id,role})});loadAdmin()}catch(e){alert(e.message);loadAdmin()}
+}
+async function reviewAdminRequest(id,decision){
+ if(!confirm(decision==='approve'?'Valider cette action ?':'Refuser cette demande ?'))return;
+ try{await api('/api/admin/requests/'+id,{method:'POST',body:JSON.stringify({decision})});loadAdmin()}catch(e){alert(e.message)}
+}
+\nfunction showAuth(startMode='login'){mode=startMode;$('authLayer').classList.remove('hidden');$('authNotice').textContent='';$('username').focus();updateAuth()}
 function hideAuth(){$('authLayer').classList.add('hidden')}
 function toggleAuth(){mode=mode==='login'?'register':'login';$('authNotice').textContent='';updateAuth()}
 function updateAuth(){$('authTitle').textContent=mode==='login'?'Connexion':'Créer un compte';$('authSubmit').textContent=mode==='login'?'Se connecter':'Créer mon compte';$('password').autocomplete=mode==='login'?'current-password':'new-password';$('authSwitch').innerHTML=mode==='login'?'Pas encore de compte ? <a href="#" onclick="toggleAuth();return false" style="color:var(--cyan)">Créer un compte</a>':'Déjà un compte ? <a href="#" onclick="toggleAuth();return false" style="color:var(--cyan)">Se connecter</a>'}
-async function submitAuth(){const username=$('username').value.trim(),password=$('password').value;$('authNotice').textContent='';try{await api('/api/'+mode,{method:'POST',body:JSON.stringify({username,password})});hideAuth();const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;user=s.user;renderUser(s);refreshSocial();$('gameNotice').textContent='Connecté ! Tes prochains scores seront sauvegardés.';}catch(e){$('authNotice').textContent=e.message}}
-async function logout(){try{await api('/api/logout',{method:'POST'});user=null;const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;renderUser(s);refreshSocial()}catch(e){$('gameNotice').textContent=e.message}}
+async function submitAuth(){const username=$('username').value.trim(),password=$('password').value;$('authNotice').textContent='';try{await api('/api/'+mode,{method:'POST',body:JSON.stringify({username,password})});hideAuth();const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;user=s.user;renderUser(s);refreshSocial();loadAdmin();$('gameNotice').textContent='Connecté ! Tes prochains scores seront sauvegardés.';}catch(e){$('authNotice').textContent=e.message}}
+async function logout(){try{await api('/api/logout',{method:'POST'});user=null;$('adminPanel').classList.add('hidden');const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;renderUser(s);refreshSocial();loadAdmin()}catch(e){$('gameNotice').textContent=e.message}}
 $('durations').addEventListener('click',e=>{const b=e.target.closest('button[data-time]');if(!b||running)return;selectedDuration=Number(b.dataset.time);$('durations').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));resetGame()});
 $('boardTabs').addEventListener('click',e=>{const b=e.target.closest('button[data-time]');if(!b)return;boardDuration=Number(b.dataset.time);$('boardTabs').querySelectorAll('button').forEach(x=>{x.classList.toggle('active',x===b);x.classList.toggle('secondary',x!==b)});loadBoard()});
 function resetGame(){running=false;finished=false;clicks=0;cancelAnimationFrame(raf);$('clicks').textContent='0';$('cps').textContent='0.00';$('timer').textContent=selectedDuration.toFixed(1);$('arenaTitle').textContent='CLIQUE ICI !';$('arenaSub').textContent='Appuie pour commencer';$('gameNotice').textContent='';$('replayBtn').classList.add('hidden')}
