@@ -123,13 +123,16 @@ def init_db():
         con.execute('CREATE INDEX IF NOT EXISTS idx_friend_requests_recipient ON friend_requests(recipient_id,status)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_dm_pair ON direct_messages(sender_id,recipient_id,created_at)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_club_messages ON club_messages(club_id,created_at)')
+        con.execute('CREATE INDEX IF NOT EXISTS idx_dm_recipient_pair ON direct_messages(recipient_id,sender_id,created_at)')
+        con.execute('CREATE INDEX IF NOT EXISTS idx_scores_duration_cps ON scores(duration,cps DESC,user_id)')
 
 
 def current_user():
+    # Keep session lookups lightweight: avatar_data can be a large base64 image.
     uid = session.get('user_id')
     if not uid: return None
     with db() as con:
-        row = con.execute('SELECT id, username, created_at, avatar_data FROM users WHERE id=?', (uid,)).fetchone()
+        row = con.execute('SELECT id, username, created_at FROM users WHERE id=?', (uid,)).fetchone()
     return dict(row) if row else None
 
 def require_csrf():
@@ -143,7 +146,10 @@ def security_headers(resp):
     resp.headers['X-Content-Type-Options'] = 'nosniff'
     resp.headers['X-Frame-Options'] = 'DENY'
     resp.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    resp.headers['Cache-Control'] = 'no-store'
+    if request.path.startswith('/api/'):
+        resp.headers['Cache-Control'] = 'no-store'
+    elif request.path == '/':
+        resp.headers['Cache-Control'] = 'no-cache'
     return resp
 
 @app.get('/')
@@ -156,8 +162,10 @@ def state():
     result = {'user': user, 'csrf': session['csrf_token']}
     if user:
         with db() as con:
+            profile = con.execute('SELECT avatar_data FROM users WHERE id=?', (user['id'],)).fetchone()
             best = con.execute('SELECT MAX(cps) AS best, COUNT(*) AS total FROM scores WHERE user_id=?', (user['id'],)).fetchone()
             recent = con.execute('SELECT clicks, duration, cps, created_at FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 10', (user['id'],)).fetchall()
+        user['avatar_data'] = profile['avatar_data'] if profile else None
         result['stats'] = {'best': round(best['best'] or 0, 2), 'total': best['total']}
         result['history'] = [dict(r) for r in recent]
     return jsonify(result)
@@ -216,7 +224,11 @@ def update_profile():
     username = str(data.get('username', '')).strip()
     if not re.fullmatch(r'[A-Za-z0-9_]{3,18}', username):
         return jsonify(error='Le pseudo doit contenir 3 à 18 caractères : lettres, chiffres ou _.'), 400
-    avatar_data = data.get('avatar', user.get('avatar_data'))
+    avatar_data = data.get('avatar')
+    if 'avatar' not in data:
+        with db() as con:
+            old_avatar = con.execute('SELECT avatar_data FROM users WHERE id=?', (user['id'],)).fetchone()
+        avatar_data = old_avatar['avatar_data'] if old_avatar else None
     if avatar_data is not None:
         avatar_data = str(avatar_data)
         match = re.fullmatch(r'data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})', avatar_data)
