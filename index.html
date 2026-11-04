@@ -16,7 +16,7 @@
 <header class="top"><div class="brand">CLICK<span>RUSH</span> ⚡</div><nav class="userbar page-nav"><button data-page="home" onclick="showPage('home')">Jeu</button><button data-page="profile" onclick="showPage('profile')">Profil</button><button data-page="board" onclick="showPage('board')">🏆 Classement mondial</button><button data-page="friends" onclick="showPage('friends')">Amis</button><button data-page="messages" onclick="showPage('messages')">Messages</button><button data-page="clubs" onclick="showPage('clubs')">Ligues</button><button id="registerBtn" onclick="showAuth('register')">Créer un compte</button><button id="authBtn" class="secondary" onclick="showAuth('login')">Connexion</button><button id="logoutBtn" class="ghost hidden" onclick="logout()">Déconnexion</button></nav></header>
 <section id="homePage"><section class="hero"><div class="eyebrow">ENTRAÎNE TES RÉFLEXES</div><h1>À quelle vitesse peux-tu cliquer ?</h1><p>Teste ton CPS, bats ton record et grimpe dans le classement.</p></section>
 <div class="grid"><main class="panel"><h2>🎯 Test de clic</h2><div class="durations" id="durations"><button data-time="5">5 sec</button><button data-time="10" class="active">10 sec</button><button data-time="15">15 sec</button><button data-time="30">30 sec</button><button data-time="60">60 sec</button></div>
-<button class="arena" id="arena" onclick="tap()"><span class="big" id="arenaTitle">CLIQUE ICI !</span><span class="small" id="arenaSub">Appuie pour commencer</span><span class="hint">Chaque clic compte • Espace fonctionne aussi</span></button>
+<button class="arena" id="arena" onclick="tap(event)"><span class="big" id="arenaTitle">CLIQUE ICI !</span><span class="small" id="arenaSub">Appuie pour commencer</span><span class="hint">Chaque clic compte • Espace fonctionne aussi</span></button>
 <button id="replayBtn" class="hidden" onclick="resetGame()">🔄 Rejouer</button>
 <div class="metrics"><div class="metric"><strong id="clicks">0</strong><span>Clics</span></div><div class="metric"><strong id="cps">0.00</strong><span>CPS</span></div><div class="metric"><strong id="timer">10.0</strong><span>Secondes</span></div></div><div class="notice" id="gameNotice" aria-live="polite"></div></main>
 </div></section>
@@ -30,7 +30,7 @@
 <div id="authLayer" class="hidden" style="position:fixed;inset:0;background:#050916dd;z-index:5;padding:18px;overflow:auto"><div class="panel auth"><div class="brand">CLICK<span>RUSH</span> ⚡</div><h2 id="authTitle">Connexion</h2><div class="field"><label for="username">Pseudo</label><input id="username" maxlength="18" autocomplete="username" placeholder="TonPseudo"></div><div class="field"><label for="password">Mot de passe</label><input id="password" type="password" autocomplete="current-password" placeholder="8 caractères minimum"></div><div class="auth-actions"><button id="authSubmit" onclick="submitAuth()">Se connecter</button><button class="ghost" onclick="hideAuth()">Fermer</button></div><p class="note" id="authSwitch">Pas encore de compte ? <a href="#" onclick="toggleAuth();return false" style="color:var(--cyan)">Créer un compte</a></p><div class="notice" id="authNotice"></div></div></div>
 <div id="profileLayer" class="hidden" style="position:fixed;inset:0;background:#050916dd;z-index:6;padding:18px;overflow:auto"><div class="panel auth"><div class="brand">CLICK<span>RUSH</span> ⚡</div><h2>Modifier mon profil</h2><div style="display:flex;justify-content:center;margin:18px"><div id="avatarPreview" class="avatar" style="width:110px;height:110px">👤</div></div><div class="field"><label for="avatarFile">Photo de profil</label><input id="avatarFile" type="file" accept="image/png,image/jpeg,image/webp"></div><div class="field"><label for="profileUsername">Pseudo</label><input id="profileUsername" maxlength="18" autocomplete="nickname"></div><div class="auth-actions"><button onclick="saveProfile()">Enregistrer</button><button class="ghost" onclick="hideProfile()">Annuler</button></div><div class="notice" id="profileNotice" aria-live="polite"></div><p class="note">Photo JPG, PNG ou WEBP. Elle sera réduite automatiquement.</p></div></div>
 <script>
-let csrf='', user=null, selectedDuration=10, boardDuration=10, running=false, finished=false, clicks=0, startedAt=0, endAt=0, raf=0, mode='login';
+let csrf='', user=null, selectedDuration=10, boardDuration=10, running=false, finished=false, clicks=0, startedAt=0, endAt=0, raf=0, mode='login', clickTimes=[], suspiciousRun=false;
 const $=id=>document.getElementById(id);
 async function api(url, options={}){const res=await fetch(url,{...options,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,...(options.headers||{})}});let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.error||'Une erreur est survenue.');return data}
 async function init(){try{const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;user=s.user;renderUser(s);loadBoard();refreshSocial();loadAdmin();}catch(e){$('leaderboard').textContent='Impossible de contacter le serveur.'}}
@@ -190,10 +190,12 @@ async function submitAuth(){const username=$('username').value.trim(),password=$
 async function logout(){try{await api('/api/logout',{method:'POST'});user=null;$('adminPanel').classList.add('hidden');const s=await fetch('/api/state').then(r=>r.json());csrf=s.csrf;renderUser(s);refreshSocial();loadAdmin()}catch(e){$('gameNotice').textContent=e.message}}
 $('durations').addEventListener('click',e=>{const b=e.target.closest('button[data-time]');if(!b||running)return;selectedDuration=Number(b.dataset.time);$('durations').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));resetGame()});
 $('boardTabs').addEventListener('click',e=>{const b=e.target.closest('button[data-time]');if(!b)return;boardDuration=Number(b.dataset.time);$('boardTabs').querySelectorAll('button').forEach(x=>{x.classList.toggle('active',x===b);x.classList.toggle('secondary',x!==b)});loadBoard()});
-function resetGame(){running=false;finished=false;clicks=0;cancelAnimationFrame(raf);$('clicks').textContent='0';$('cps').textContent='0.00';$('timer').textContent=selectedDuration.toFixed(1);$('arenaTitle').textContent='CLIQUE ICI !';$('arenaSub').textContent='Appuie pour commencer';$('gameNotice').textContent='';$('replayBtn').classList.add('hidden')}
-function tap(){
-  // Une fois le test terminé, les clics sont ignorés. Seul « Rejouer » réinitialise le test.
-  if(finished)return;
+function resetGame(){running=false;finished=false;clicks=0;clickTimes=[];suspiciousRun=false;cancelAnimationFrame(raf);$('clicks').textContent='0';$('cps').textContent='0.00';$('timer').textContent=selectedDuration.toFixed(1);$('arenaTitle').textContent='CLIQUE ICI !';$('arenaSub').textContent='Appuie pour commencer';$('gameNotice').textContent='';$('replayBtn').classList.add('hidden')}
+function blockAutomatedRun(reason){running=false;finished=true;suspiciousRun=true;cancelAnimationFrame(raf);$('arenaTitle').textContent='AUTOMATISATION DÉTECTÉE';$('arenaSub').textContent='Cette partie est annulée';$('gameNotice').textContent=reason;$('replayBtn').classList.remove('hidden')}
+function tap(e){
+  // Les événements synthétiques déclenchés par script ne sont jamais acceptés.
+  if(e && e.isTrusted===false){blockAutomatedRun('Événement de clic automatisé refusé.');return}
+  if(finished||suspiciousRun)return;
   const now=performance.now();
   if(!running){
     running=true;
@@ -204,7 +206,10 @@ function tap(){
     tick();
   }
   if(now>=endAt){finish();return}
-  clicks++;
+  clicks++;clickTimes.push(now);if(clickTimes.length>16)clickTimes.shift();
+  // Un autoclicker produit souvent une cadence anormalement régulière.
+  // On annule la partie si 14 intervalles consécutifs sont presque identiques.
+  if(clickTimes.length>=15){const gaps=clickTimes.slice(1).map((t,i)=>t-clickTimes[i]);const mean=gaps.reduce((a,b)=>a+b,0)/gaps.length;const variance=gaps.reduce((a,b)=>a+(b-mean)*(b-mean),0)/gaps.length;const cv=Math.sqrt(variance)/mean;if(mean>=35&&mean<=180&&cv<0.018){blockAutomatedRun('Cadence de clics trop régulière : utilise uniquement tes clics manuels.');return}}
   $('clicks').textContent=clicks;
   $('cps').textContent=(clicks/Math.max((now-startedAt)/1000,.01)).toFixed(2);
 }
@@ -232,7 +237,7 @@ async function finish(){
     $('gameNotice').textContent+=' Connecte-toi pour enregistrer ton score.';
   }
 }
-document.addEventListener('keydown',e=>{if(e.code==='Space'&&!$('authLayer').classList.contains('hidden'))return;if(e.code==='Space'&&e.target.tagName!=='INPUT'&&e.target.tagName!=='BUTTON'){e.preventDefault();tap()}});
+document.addEventListener('keydown',e=>{if(e.code==='Space'&&!$('authLayer').classList.contains('hidden'))return;if(e.code==='Space'&&e.target.tagName!=='INPUT'&&e.target.tagName!=='BUTTON'){e.preventDefault();tap(e)}});
 async function loadBoard(force=false){try{const cached=boardCache.get(boardDuration);let rows;if(!force&&cached&&Date.now()-cached.time<15000){rows=cached.rows}else{rows=await fetch('/api/leaderboard?duration='+boardDuration).then(r=>r.json());boardCache.set(boardDuration,{rows,time:Date.now()})}$('leaderboard').innerHTML=rows.length?rows.map((r,i)=>`<div class="leader-row"><span class="rank">#${i+1}</span><b>${escapeHtml(r.username)}</b><span class="score">${Number(r.cps).toFixed(2)} <small class="muted">CPS</small></span></div>`).join(''):'<div class="empty">Pas encore de scores. À toi de jouer !</div>'}catch{$('leaderboard').textContent='Classement indisponible.'}}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function avatarHtml(src,name,cls='mini-avatar'){const label=String(name||'?').trim().charAt(0).toUpperCase()||'?';return src?'<img class="'+cls+'" src="'+escapeHtml(src)+'" alt="Photo de '+escapeHtml(name||'joueur')+'">':'<span class="'+cls+'" aria-label="Avatar">'+escapeHtml(label)+'</span>'}
