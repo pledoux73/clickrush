@@ -97,6 +97,17 @@ def init_db():
                 id BIGSERIAL PRIMARY KEY, sender_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 recipient_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 body TEXT NOT NULL, created_at BIGINT NOT NULL)""")
+            con.execute("""CREATE TABLE IF NOT EXISTS group_conversations (
+                id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, owner_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at BIGINT NOT NULL)""")
+            con.execute("""CREATE TABLE IF NOT EXISTS group_members (
+                conversation_id BIGINT NOT NULL REFERENCES group_conversations(id) ON DELETE CASCADE,
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                joined_at BIGINT NOT NULL, PRIMARY KEY(conversation_id,user_id))""")
+            con.execute("""CREATE TABLE IF NOT EXISTS group_messages (
+                id BIGSERIAL PRIMARY KEY, conversation_id BIGINT NOT NULL REFERENCES group_conversations(id) ON DELETE CASCADE,
+                sender_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                body TEXT NOT NULL, created_at BIGINT NOT NULL)""")
             con.execute("""CREATE TABLE IF NOT EXISTS clubs (
                 id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, owner_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 created_at BIGINT NOT NULL)""")
@@ -121,6 +132,17 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 body TEXT NOT NULL, created_at INTEGER NOT NULL)""")
+            con.execute("""CREATE TABLE IF NOT EXISTS group_conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+                owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at INTEGER NOT NULL)""")
+            con.execute("""CREATE TABLE IF NOT EXISTS group_members (
+                conversation_id INTEGER NOT NULL REFERENCES group_conversations(id) ON DELETE CASCADE,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                joined_at INTEGER NOT NULL, PRIMARY KEY(conversation_id,user_id))""")
+            con.execute("""CREATE TABLE IF NOT EXISTS group_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL REFERENCES group_conversations(id) ON DELETE CASCADE,
+                sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                body TEXT NOT NULL, created_at INTEGER NOT NULL)""")
             con.execute("""CREATE TABLE IF NOT EXISTS clubs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL COLLATE NOCASE UNIQUE,
                 owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at INTEGER NOT NULL)""")
@@ -134,6 +156,8 @@ def init_db():
                 body TEXT NOT NULL, created_at INTEGER NOT NULL)""")
         con.execute('CREATE INDEX IF NOT EXISTS idx_friend_requests_recipient ON friend_requests(recipient_id,status)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_dm_pair ON direct_messages(sender_id,recipient_id,created_at)')
+        con.execute('CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id,conversation_id)')
+        con.execute('CREATE INDEX IF NOT EXISTS idx_group_messages ON group_messages(conversation_id,created_at)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_club_messages ON club_messages(club_id,created_at)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_dm_recipient_pair ON direct_messages(recipient_id,sender_id,created_at)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_scores_duration_cps ON scores(duration,cps DESC,user_id)')
@@ -566,6 +590,81 @@ def send_message():
         if not are_friends(con,user['id'],other):return jsonify(error='Tu dois être ami avec ce joueur.'),403
         con.execute('INSERT INTO direct_messages(sender_id,recipient_id,body,created_at) VALUES(?,?,?,?)',(user['id'],other,body,int(time.time())))
     return jsonify(ok=True)
+
+@app.get('/api/groups')
+def list_message_groups():
+    user=current_user()
+    if not user:return jsonify(error='Connecte-toi.'),401
+    with db() as con:
+        rows=con.execute("""SELECT c.id,c.name,c.owner_id,c.created_at,
+            (SELECT COUNT(*) FROM group_members gm WHERE gm.conversation_id=c.id) AS members
+            FROM group_conversations c JOIN group_members mine ON mine.conversation_id=c.id
+            WHERE mine.user_id=? ORDER BY c.created_at DESC""",(user['id'],)).fetchall()
+    return jsonify(groups=[dict(r) for r in rows])
+
+
+@app.post('/api/groups')
+def create_message_group():
+    bad=require_csrf()
+    if bad:return bad
+    user=current_user()
+    if not user:return jsonify(error='Connecte-toi.'),401
+    data=request.get_json(silent=True) or {}
+    name=str(data.get('name','')).strip()
+    raw=data.get('member_ids',[])
+    if not isinstance(raw,list):return jsonify(error='Liste de membres invalide.'),400
+    try: member_ids=list(dict.fromkeys(int(x) for x in raw if int(x)!=user['id']))
+    except (TypeError,ValueError):return jsonify(error='Membres invalides.'),400
+    if not re.fullmatch(r'.{2,32}',name):return jsonify(error='Le nom du groupe doit contenir 2 à 32 caractères.'),400
+    if not member_ids or len(member_ids)>30:return jsonify(error='Choisis entre 1 et 30 amis.'),400
+    with db() as con:
+        for other in member_ids:
+            if not are_friends(con,user['id'],other):
+                return jsonify(error='Tous les membres doivent être dans ta liste d’amis.'),403
+        if con.postgres:
+            row=con.execute('INSERT INTO group_conversations(name,owner_id,created_at) VALUES(?,?,?) RETURNING id',
+                (name,user['id'],int(time.time()))).fetchone()
+            gid=row['id']
+        else:
+            cur=con.execute('INSERT INTO group_conversations(name,owner_id,created_at) VALUES(?,?,?)',
+                (name,user['id'],int(time.time())))
+            gid=cur.lastrowid
+        now=int(time.time())
+        con.execute('INSERT INTO group_members(conversation_id,user_id,joined_at) VALUES(?,?,?)',(gid,user['id'],now))
+        for other in member_ids:
+            con.execute('INSERT INTO group_members(conversation_id,user_id,joined_at) VALUES(?,?,?)',(gid,other,now))
+    return jsonify(ok=True,group_id=gid)
+
+
+@app.get('/api/groups/<int:group_id>/messages')
+def get_message_group(group_id):
+    user=current_user()
+    if not user:return jsonify(error='Connecte-toi.'),401
+    with db() as con:
+        member=con.execute('SELECT 1 FROM group_members WHERE conversation_id=? AND user_id=?',(group_id,user['id'])).fetchone()
+        if not member:return jsonify(error='Tu ne fais pas partie de ce groupe.'),403
+        rows=con.execute("""SELECT m.id,m.sender_id,m.body,m.created_at,u.username
+            FROM group_messages m JOIN users u ON u.id=m.sender_id WHERE m.conversation_id=?
+            ORDER BY m.created_at DESC,m.id DESC LIMIT 100""",(group_id,)).fetchall()
+    return jsonify(messages=[dict(r) for r in reversed(rows)])
+
+
+@app.post('/api/groups/<int:group_id>/messages')
+def send_message_group(group_id):
+    bad=require_csrf()
+    if bad:return bad
+    user=current_user()
+    if not user:return jsonify(error='Connecte-toi.'),401
+    data=request.get_json(silent=True) or {}
+    body=str(data.get('body','')).strip()
+    if not body or len(body)>1000:return jsonify(error='Le message doit contenir entre 1 et 1000 caractères.'),400
+    with db() as con:
+        member=con.execute('SELECT 1 FROM group_members WHERE conversation_id=? AND user_id=?',(group_id,user['id'])).fetchone()
+        if not member:return jsonify(error='Tu ne fais pas partie de ce groupe.'),403
+        con.execute('INSERT INTO group_messages(conversation_id,sender_id,body,created_at) VALUES(?,?,?,?)',
+            (group_id,user['id'],body,int(time.time())))
+    return jsonify(ok=True)
+
 
 @app.post('/api/clubs')
 def create_club():
