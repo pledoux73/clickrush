@@ -83,6 +83,7 @@ def init_db():
             con.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS auto_reason TEXT NOT NULL DEFAULT ''")
             con.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS click_pattern TEXT NOT NULL DEFAULT ''")
             con.execute('ALTER TABLE scores ADD COLUMN IF NOT EXISTS auto_processed BOOLEAN NOT NULL DEFAULT FALSE')
+            con.execute('ALTER TABLE scores ADD COLUMN IF NOT EXISTS replay_data TEXT NOT NULL DEFAULT \'[]\'')
             con.execute('''CREATE TABLE IF NOT EXISTS player_notifications (
                 id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 body TEXT NOT NULL, created_at BIGINT NOT NULL, seen BOOLEAN NOT NULL DEFAULT FALSE)''')
@@ -95,6 +96,7 @@ def init_db():
             if 'auto_reason' not in score_columns: con.execute("ALTER TABLE scores ADD COLUMN auto_reason TEXT NOT NULL DEFAULT ''")
             if 'click_pattern' not in score_columns: con.execute("ALTER TABLE scores ADD COLUMN click_pattern TEXT NOT NULL DEFAULT ''")
             if 'auto_processed' not in score_columns: con.execute('ALTER TABLE scores ADD COLUMN auto_processed INTEGER NOT NULL DEFAULT 0')
+            if 'replay_data' not in score_columns: con.execute("ALTER TABLE scores ADD COLUMN replay_data TEXT NOT NULL DEFAULT '[]'")
             con.execute('''CREATE TABLE IF NOT EXISTS player_notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 body TEXT NOT NULL, created_at INTEGER NOT NULL, seen INTEGER NOT NULL DEFAULT 0)''')
@@ -456,6 +458,21 @@ def save_score():
         return jsonify(error='Score hors limites.'), 400
     cps = round(clicks / duration, 2)
     now = int(time.time())
+    replay_events = data.get('replay', [])
+    if not isinstance(replay_events, list) or len(replay_events) > 2500:
+        return jsonify(error='Replay invalide.'), 400
+    clean_events = []
+    for event in replay_events:
+        if not isinstance(event, dict) or event.get('type') not in ('click', 'key'):
+            return jsonify(error='Événement de replay invalide.'), 400
+        try: event_time = max(0, min(duration * 1000, int(event.get('t', 0))))
+        except (TypeError, ValueError): return jsonify(error='Horodatage de replay invalide.'), 400
+        item = {'t': event_time, 'type': event['type']}
+        if event['type'] == 'key':
+            key = str(event.get('key', ''))[:16]
+            if not key: continue
+            item['key'] = key
+        clean_events.append(item)
     with db() as con:
         # Un test normal dure au minimum la durée choisie. Cette vérification
         # bloque les envois répétés/fabriqués trop rapprochés.
@@ -481,8 +498,8 @@ def save_score():
             except (TypeError, ValueError):
                 return jsonify(error='Données de cadence invalides.'), 400
         pattern = ','.join(str(x) for x in clean_intervals)
-        con.execute('INSERT INTO scores(user_id,clicks,duration,cps,created_at,click_pattern) VALUES(?,?,?,?,?,?)',
-            (user['id'], clicks, duration, cps, now, pattern))
+        con.execute('INSERT INTO scores(user_id,clicks,duration,cps,created_at,click_pattern,replay_data) VALUES(?,?,?,?,?,?,?)',
+            (user['id'], clicks, duration, cps, now, pattern, __import__('json').dumps(clean_events, separators=(',', ':'))))
     return jsonify(ok=True, cps=cps)
 
 @app.get('/api/leaderboard')
@@ -840,6 +857,17 @@ def admin_overview():
     return jsonify(role=actor['role'],users=[dict(r) for r in users],
         scores=[dict(r) for r in scores],requests=[dict(r) for r in pending])
 
+@app.get('/api/admin/replay/<int:score_id>')
+def admin_replay(score_id):
+    actor,error=staff_required()
+    if error:return error
+    with db() as con:
+        row=con.execute('SELECT s.id,s.user_id,s.clicks,s.duration,s.cps,s.created_at,s.replay_data,u.username FROM scores s JOIN users u ON u.id=s.user_id WHERE s.id=?',(score_id,)).fetchone()
+        if not row:return jsonify(error='Partie introuvable.'),404
+    try: events=__import__('json').loads(row['replay_data'] or '[]')
+    except (ValueError,TypeError): events=[]
+    return jsonify(score={k:row[k] for k in ('id','user_id','clicks','duration','cps','created_at','username')},events=events,available=bool(events))
+
 @app.get('/api/admin/history/<int:target_id>')
 def admin_history(target_id):
     actor,error=staff_required()
@@ -847,7 +875,7 @@ def admin_history(target_id):
     with db() as con:
         target=con.execute('SELECT id,username,avatar_data,role,is_banned,created_at FROM users WHERE id=?',(target_id,)).fetchone()
         if not target:return jsonify(error='Joueur introuvable.'),404
-        rows=con.execute('SELECT id,clicks,duration,cps,created_at,auto_status,auto_reason FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 200',(target_id,)).fetchall()
+        rows=con.execute('SELECT id,clicks,duration,cps,created_at,auto_status,auto_reason,replay_data FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 200',(target_id,)).fetchall()
     return jsonify(user=dict(target),history=[dict(r) for r in rows])
 
 @app.post('/api/admin/action')
