@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, session, send_from_directory
 from werkzeug.security import generate_password_hash, check_password_hash
 from contextlib import contextmanager
 from pathlib import Path
-import os, re, secrets, time, sqlite3
+import os, re, secrets, time, sqlite3, hmac, hashlib
 
 BASE_DIR = Path(__file__).resolve().parent
 DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
@@ -142,6 +142,7 @@ def init_db():
             con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'")
             con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT FALSE")
             con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT")
+            con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ip_hash TEXT")
             con.execute("""CREATE TABLE IF NOT EXISTS admin_settings (
                 id INTEGER PRIMARY KEY, creator_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL)""")
             con.execute("""CREATE TABLE IF NOT EXISTS admin_requests (
@@ -155,6 +156,7 @@ def init_db():
             if 'role' not in columns: con.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
             if 'is_banned' not in columns: con.execute("ALTER TABLE users ADD COLUMN is_banned INTEGER NOT NULL DEFAULT 0")
             if 'ban_reason' not in columns: con.execute("ALTER TABLE users ADD COLUMN ban_reason TEXT")
+            if 'ip_hash' not in columns: con.execute("ALTER TABLE users ADD COLUMN ip_hash TEXT")
             con.execute("""CREATE TABLE IF NOT EXISTS admin_settings (
                 id INTEGER PRIMARY KEY, creator_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL)""")
             con.execute("""CREATE TABLE IF NOT EXISTS admin_requests (
@@ -220,6 +222,18 @@ def apply_staff_action(con, actor, action, target_id=None, score_id=None, reason
         return None
     return 'Action non autorisée.'
 
+def client_ip_fingerprint():
+    # Render transmet l'adresse cliente dans X-Forwarded-For.
+    # Le reverse proxy doit écraser ce header (ne pas exposer Flask directement).
+    forwarded = request.headers.get('X-Forwarded-For', '')
+    ip = (forwarded.split(',')[0].strip() if forwarded else request.remote_addr) or ''
+    if not ip:
+        return None
+    # HMAC : l'adresse IP brute n'est jamais enregistrée en base.
+    key = str(app.secret_key).encode('utf-8')
+    return hmac.new(key, ip.encode('utf-8'), hashlib.sha256).hexdigest()
+
+
 def require_csrf():
     token = request.headers.get('X-CSRF-Token', '')
     if not token or not secrets.compare_digest(token, session.get('csrf_token', '')):
@@ -265,13 +279,26 @@ def register():
         return jsonify(error='Le pseudo doit contenir 3 à 18 caractères : lettres, chiffres ou _.'), 400
     if len(password) < 8 or len(password) > 128:
         return jsonify(error='Le mot de passe doit contenir au moins 8 caractères.'), 400
+    ip_hash = client_ip_fingerprint()
     try:
         with db() as con:
+            # Un nouvel identifiant créé depuis une IP déjà associée à un compte banni
+            # est automatiquement suspendu. L'IP est hachée, jamais stockée en clair.
+            linked_to_ban = bool(ip_hash and con.execute(
+                'SELECT 1 FROM users WHERE ip_hash=? AND is_banned=? LIMIT 1',
+                (ip_hash, True if con.postgres else 1)
+            ).fetchone())
             if con.postgres:
-                row = con.execute('INSERT INTO users(username,password_hash,created_at) VALUES(?,?,?) RETURNING id', (username, generate_password_hash(password), int(time.time()))).fetchone()
+                row = con.execute('''INSERT INTO users(username,password_hash,created_at,ip_hash,is_banned,ban_reason)
+                    VALUES(?,?,?,?,?,?) RETURNING id''',
+                    (username, generate_password_hash(password), int(time.time()), ip_hash,
+                     linked_to_ban, 'Compte lié à une adresse IP associée à un compte banni.' if linked_to_ban else None)).fetchone()
                 uid = row['id']
             else:
-                cur = con.execute('INSERT INTO users(username,password_hash,created_at) VALUES(?,?,?)', (username, generate_password_hash(password), int(time.time())))
+                cur = con.execute('''INSERT INTO users(username,password_hash,created_at,ip_hash,is_banned,ban_reason)
+                    VALUES(?,?,?,?,?,?)''',
+                    (username, generate_password_hash(password), int(time.time()), ip_hash,
+                     1 if linked_to_ban else 0, 'Compte lié à une adresse IP associée à un compte banni.' if linked_to_ban else None))
                 uid = cur.lastrowid
     except Exception as exc:
         if 'unique' in str(exc).lower() or 'duplicate' in str(exc).lower():
@@ -290,8 +317,15 @@ def login():
         user = con.execute('SELECT id, password_hash FROM users WHERE username=? COLLATE NOCASE' if not con.postgres else 'SELECT id, password_hash FROM users WHERE lower(username)=lower(?)', (username,)).fetchone()
     if not user or not check_password_hash(user['password_hash'], password):
         return jsonify(error='Pseudo ou mot de passe incorrect.'), 401
+    ip_hash = client_ip_fingerprint()
     with db() as con:
-        account = con.execute('SELECT is_banned,ban_reason FROM users WHERE id=?', (user['id'],)).fetchone()
+        account = con.execute('SELECT is_banned,ban_reason,role,ip_hash FROM users WHERE id=?', (user['id'],)).fetchone()
+        if account and not account['is_banned'] and ip_hash:
+            linked_ban = con.execute('SELECT 1 FROM users WHERE ip_hash=? AND is_banned=? AND id<>? LIMIT 1',
+                (ip_hash, True if con.postgres else 1, user['id'])).fetchone()
+            # Un compte existant est seulement marqué par son IP à la connexion.
+            # On ne bannit pas rétroactivement un foyer entier sur la seule IP.
+            con.execute('UPDATE users SET ip_hash=? WHERE id=?', (ip_hash, user['id']))
     if account and account['is_banned']:
         return jsonify(error='Compte suspendu. Motif : '+str(account['ban_reason'] or 'Non précisé')), 403
     session.clear(); session['user_id'] = user['id']; session['csrf_token'] = secrets.token_urlsafe(32)
@@ -353,14 +387,26 @@ def save_score():
     user = current_user()
     if not user: return jsonify(error='Connecte-toi pour sauvegarder ton score.'), 401
     data = request.get_json(silent=True) or {}
-    try:
-        clicks, duration = int(data.get('clicks')), int(data.get('duration'))
-    except (TypeError, ValueError): return jsonify(error='Score invalide.'), 400
+    if not isinstance(data, dict) or type(data.get('clicks')) is not int or type(data.get('duration')) is not int:
+        return jsonify(error='Format de score invalide.'), 400
+    clicks, duration = data['clicks'], data['duration']
     if duration not in (5, 10, 15, 30, 60) or clicks < 0 or clicks > duration * 30:
         return jsonify(error='Score hors limites.'), 400
     cps = round(clicks / duration, 2)
+    now = int(time.time())
     with db() as con:
-        con.execute('INSERT INTO scores(user_id,clicks,duration,cps,created_at) VALUES(?,?,?,?,?)', (user['id'], clicks, duration, cps, int(time.time())))
+        # Un test normal dure au minimum la durée choisie. Cette vérification
+        # bloque les envois répétés/fabriqués trop rapprochés.
+        previous = con.execute('SELECT created_at FROM scores WHERE user_id=? ORDER BY created_at DESC LIMIT 1',
+            (user['id'],)).fetchone()
+        if previous and now - int(previous['created_at']) < max(3, duration - 1):
+            return jsonify(error='Score refusé : délai anormal entre deux parties.'), 429
+        # Au-delà de 20 CPS, le résultat est refusé (suspicion d'autoclicker).
+        # Pas de bannissement automatique sur un seul score atypique.
+        if cps > 20:
+            return jsonify(error='Score refusé : cadence anormalement élevée, vérification anti-triche.'), 400
+        con.execute('INSERT INTO scores(user_id,clicks,duration,cps,created_at) VALUES(?,?,?,?,?)',
+            (user['id'], clicks, duration, cps, now))
     return jsonify(ok=True, cps=cps)
 
 @app.get('/api/leaderboard')
