@@ -28,12 +28,24 @@ class DB:
             return cur
         return self.conn.execute(sql, params)
 
+_PG_POOL = None
+
+def get_pg_pool():
+    global _PG_POOL
+    if _PG_POOL is None:
+        from psycopg_pool import ConnectionPool
+        url = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+        _PG_POOL = ConnectionPool(
+            conninfo=url, min_size=1, max_size=5,
+            kwargs={'sslmode': 'require'}, open=False
+        )
+        _PG_POOL.open(wait=False)
+    return _PG_POOL
+
 @contextmanager
 def db():
     if DATABASE_URL:
-        import psycopg
-        url = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-        with psycopg.connect(url, sslmode='require') as conn:
+        with get_pg_pool().connection() as conn:
             yield DB(conn, True)
     else:
         conn = sqlite3.connect(BASE_DIR / 'clics.db')
