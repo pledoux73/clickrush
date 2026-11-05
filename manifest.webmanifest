@@ -1,0 +1,22 @@
+{
+  "id": "/",
+  "name": "ClickRush",
+  "short_name": "ClickRush",
+  "description": "Teste ta vitesse de clic, bats tes records et défie tes amis.",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1020",
+  "theme_color": "#0b1020",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "/clickrush-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
