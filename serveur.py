@@ -125,6 +125,10 @@ def init_db():
                 id BIGSERIAL PRIMARY KEY, sender_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 recipient_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 body TEXT NOT NULL, created_at BIGINT NOT NULL)""")
+            con.execute("""CREATE TABLE IF NOT EXISTS message_read_state (
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                scope TEXT NOT NULL, conversation_id BIGINT NOT NULL, last_read_at BIGINT NOT NULL,
+                PRIMARY KEY(user_id,scope,conversation_id))""")
             con.execute("""CREATE TABLE IF NOT EXISTS group_conversations (
                 id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, owner_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 created_at BIGINT NOT NULL)""")
@@ -160,6 +164,10 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 body TEXT NOT NULL, created_at INTEGER NOT NULL)""")
+            con.execute("""CREATE TABLE IF NOT EXISTS message_read_state (
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                scope TEXT NOT NULL, conversation_id INTEGER NOT NULL, last_read_at INTEGER NOT NULL,
+                PRIMARY KEY(user_id,scope,conversation_id))""")
             con.execute("""CREATE TABLE IF NOT EXISTS group_conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
                 owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at INTEGER NOT NULL)""")
@@ -663,6 +671,29 @@ def leaderboard():
 def social_user_row(row):
     return {'id': row['id'], 'username': row['username'], 'avatar_data': row.get('avatar_data') if hasattr(row, 'get') else row['avatar_data']}
 
+@app.get('/api/unread-counts')
+def unread_counts():
+    user=current_user()
+    if not user:return jsonify(messages=0,clubs=0)
+    uid=user['id']
+    with db() as con:
+        dm=con.execute("""SELECT COUNT(*) AS n FROM direct_messages m
+            WHERE m.recipient_id=? AND m.sender_id<>? AND m.created_at>COALESCE(
+                (SELECT r.last_read_at FROM message_read_state r
+                 WHERE r.user_id=? AND r.scope='dm' AND r.conversation_id=m.sender_id),0)""",(uid,uid,uid)).fetchone()
+        groups=con.execute("""SELECT COUNT(*) AS n FROM group_messages m
+            JOIN group_members gm ON gm.conversation_id=m.conversation_id AND gm.user_id=?
+            WHERE m.sender_id<>? AND m.created_at>COALESCE(
+                (SELECT r.last_read_at FROM message_read_state r
+                 WHERE r.user_id=? AND r.scope='group' AND r.conversation_id=m.conversation_id),0)""",(uid,uid,uid)).fetchone()
+        clubs=con.execute("""SELECT COUNT(*) AS n FROM club_messages m
+            JOIN club_members cm ON cm.club_id=m.club_id AND cm.user_id=?
+            WHERE m.user_id<>? AND m.created_at>COALESCE(
+                (SELECT r.last_read_at FROM message_read_state r
+                 WHERE r.user_id=? AND r.scope='club' AND r.conversation_id=m.club_id),0)""",(uid,uid,uid)).fetchone()
+    return jsonify(messages=int(dm['n'] or 0)+int(groups['n'] or 0),clubs=int(clubs['n'] or 0))
+
+
 @app.get('/api/social')
 def social_state():
     user = current_user()
@@ -762,6 +793,9 @@ def get_messages():
             FROM direct_messages m JOIN users u ON u.id=m.sender_id
             WHERE (m.sender_id=? AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=?)
             ORDER BY m.created_at DESC,m.id DESC LIMIT 100""",(user['id'],other,other,user['id'])).fetchall()
+        con.execute("""INSERT INTO message_read_state(user_id,scope,conversation_id,last_read_at) VALUES(?,?,?,?)
+            ON CONFLICT(user_id,scope,conversation_id) DO UPDATE SET last_read_at=excluded.last_read_at""",
+            (user['id'],'dm',other,int(time.time())))
     return jsonify(messages=[dict(r) for r in reversed(rows)])
 
 @app.post('/api/messages')
@@ -835,6 +869,9 @@ def get_message_group(group_id):
         rows=con.execute("""SELECT m.id,m.sender_id,m.body,m.created_at,u.username,u.avatar_data
             FROM group_messages m JOIN users u ON u.id=m.sender_id WHERE m.conversation_id=?
             ORDER BY m.created_at DESC,m.id DESC LIMIT 100""",(group_id,)).fetchall()
+        con.execute("""INSERT INTO message_read_state(user_id,scope,conversation_id,last_read_at) VALUES(?,?,?,?)
+            ON CONFLICT(user_id,scope,conversation_id) DO UPDATE SET last_read_at=excluded.last_read_at""",
+            (user['id'],'group',group_id,int(time.time())))
     return jsonify(messages=[dict(r) for r in reversed(rows)])
 
 
@@ -998,6 +1035,9 @@ def get_club_messages(club_id):
         rows=con.execute("""SELECT m.id,m.body,m.created_at,m.user_id,u.username,u.avatar_data
             FROM club_messages m JOIN users u ON u.id=m.user_id WHERE m.club_id=?
             ORDER BY m.created_at DESC,m.id DESC LIMIT 100""",(club_id,)).fetchall()
+        con.execute("""INSERT INTO message_read_state(user_id,scope,conversation_id,last_read_at) VALUES(?,?,?,?)
+            ON CONFLICT(user_id,scope,conversation_id) DO UPDATE SET last_read_at=excluded.last_read_at""",
+            (user['id'],'club',club_id,int(time.time())))
     return jsonify(messages=[dict(r) for r in reversed(rows)])
 
 @app.post('/api/clubs/<int:club_id>/messages')
