@@ -338,6 +338,9 @@ def state():
     user = current_user()
     if 'csrf_token' not in session: session['csrf_token'] = secrets.token_urlsafe(32)
     result = {'user': user, 'csrf': session['csrf_token']}
+    with db() as con:
+        creator = con.execute("SELECT username, avatar_data FROM users WHERE role='creator' ORDER BY id LIMIT 1").fetchone()
+    result['creator_profile'] = dict(creator) if creator else {'username': 'pledoux73', 'avatar_data': None}
     if user and session.get('impersonator_id'):
         result['impersonation'] = {'active': True, 'username': user['username']}
     if user:
