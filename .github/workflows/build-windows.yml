@@ -1,0 +1,41 @@
+name: Build ClickRush for Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/build-windows.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install dependencies
+        run: npm install
+      - name: Build Windows installer and ZIP
+        run: npm run dist:win
+      - name: Upload ClickRush Windows files
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClickRush-Windows
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
