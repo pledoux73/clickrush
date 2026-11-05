@@ -854,6 +854,9 @@ def admin_auto_filter():
                 processed['clear'] += 1
             con.execute('UPDATE scores SET auto_status=?,auto_reason=?,auto_processed=? WHERE id=?',
                 (status, reason, True if con.postgres else 1, row['id']))
+            if status == 'cheat':
+                # La partie détectée comme triche est retirée de l'historique.
+                con.execute('DELETE FROM scores WHERE id=?', (row['id'],))
     return jsonify(ok=True, processed=processed)
 
 @app.get('/api/admin')
