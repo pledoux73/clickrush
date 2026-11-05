@@ -93,7 +93,8 @@ async function refreshSocial(){
   else f+="<span class='social-small'>Ajoute des joueurs pour discuter.</span>";
   f+="</div></div>";
   let cl="<div class='discord-shell'><aside class='discord-side'><div class='discord-title'>Mes ligues</div><div class='discord-create'><input id='clubName' maxlength='24' placeholder='Nom de la nouvelle ligue'><select id='clubVisibility'><option value='public'>Publique</option><option value='private'>Privée · sur invitation</option></select><button onclick='createClub()'>Créer une ligue</button></div><div class='discord-section'>Mes ligues ("+d.clubs.length+")</div><div class='discord-list'>";
-  if(d.clubs.length)d.clubs.forEach(x=>{cl+="<button class='discord-entry "+(activeClubId===x.id?"active":"")+"' onclick='openClub("+x.id+",\""+escapeHtml(x.name)+"\")'># "+escapeHtml(x.name)+" <small>"+x.members+" · "+(x.is_public?"Public":"Privé")+"</small></button>"});
+  const unreadClubs=await api("/api/unread-counts");
+  if(d.clubs.length)d.clubs.forEach(x=>{const n=Number(unreadClubs.club_items[String(x.id)]||0);cl+="<button class='discord-entry "+(activeClubId===x.id?"active":"")+"' onclick='openClub("+x.id+",\""+escapeHtml(x.name)+"\")'># "+escapeHtml(x.name)+" <small>"+x.members+" · "+(x.is_public?"Public":"Privé")+"</small>"+(n>0?"<span class='nav-count'>"+(n>99?"99+":n)+"</span>":"")+"</button>"});
   else cl+="<span class='social-small'>Tu ne fais partie d’aucune ligue.</span>";
   cl+="</div><div class='discord-section'>Découvrir</div><div class='discord-list'>";
   if(d.discover.length)d.discover.forEach(x=>{cl+="<div class='social-item'><span>"+escapeHtml(x.name)+" <small class='social-small'>("+x.members+")</small></span><button onclick='joinClub("+x.id+")'>Rejoindre</button></div>"});
@@ -115,9 +116,10 @@ async function refreshUnreadBadges(){
 async function refreshMessageSidebar(friends){
  if(!user){$("messageFriends").innerHTML="<span class='social-small'>Connecte-toi pour discuter.</span>";$("messageGroups").innerHTML="";$("groupMembers").innerHTML="";return}
  try{
-  const [g,fr]=await Promise.all([api("/api/groups"),friends?Promise.resolve(friends):api("/api/social").then(x=>x.friends)]);
-  $("messageFriends").innerHTML=fr.map(x=>"<button class='discord-entry "+(activeMessageType==="dm"&&activeFriendId===x.id?"active":"")+"' onclick='openChat("+x.id+",\""+escapeHtml(x.username)+"\")'>"+avatarHtml(x.avatar_data,x.username)+"<span>"+displayNameHtml(x.username)+"</span></button>").join("")||"<span class='social-small'>Ajoute des amis pour discuter.</span>";
-  $("messageGroups").innerHTML=g.groups.map(x=>"<button class='discord-entry "+(activeMessageType==="group"&&activeGroupId===x.id?"active":"")+"' onclick='openMessageGroup("+x.id+",\""+escapeHtml(x.name)+"\")'># "+escapeHtml(x.name)+" <small>"+x.members+"</small></button>").join("")||"<span class='social-small'>Aucun groupe pour le moment.</span>";
+  const [g,fr,unread]=await Promise.all([api("/api/groups"),friends?Promise.resolve(friends):api("/api/social").then(x=>x.friends),api("/api/unread-counts")]);
+  const countBadge=n=>Number(n)>0?"<span class='nav-count'>"+(Number(n)>99?"99+":Number(n))+"</span>":"";
+  $("messageFriends").innerHTML=fr.map(x=>"<button class='discord-entry "+(activeMessageType==="dm"&&activeFriendId===x.id?"active":"")+"' onclick='openChat("+x.id+",\""+escapeHtml(x.username)+"\")'>"+avatarHtml(x.avatar_data,x.username)+"<span>"+displayNameHtml(x.username)+"</span>"+countBadge(unread.dm[String(x.id)]||0)+"</button>").join("")||"<span class='social-small'>Ajoute des amis pour discuter.</span>";
+  $("messageGroups").innerHTML=g.groups.map(x=>"<button class='discord-entry "+(activeMessageType==="group"&&activeGroupId===x.id?"active":"")+"' onclick='openMessageGroup("+x.id+",\""+escapeHtml(x.name)+"\")'># "+escapeHtml(x.name)+" <small>"+x.members+"</small>"+countBadge(unread.groups[String(x.id)]||0)+"</button>").join("")||"<span class='social-small'>Aucun groupe pour le moment.</span>";
   $("groupMembers").innerHTML=fr.map(x=>"<option value='"+x.id+"'>"+displayNameText(x.username)+"</option>").join("");
  }catch(e){$("messageNotice").textContent=e.message}
 }
