@@ -836,6 +836,52 @@ def join_club():
         con.execute('INSERT INTO club_members(club_id,user_id,joined_at) VALUES(?,?,?) ON CONFLICT DO NOTHING',(cid,user['id'],int(time.time())))
     return jsonify(ok=True)
 
+@app.get('/api/clubs/<int:club_id>/settings')
+def get_club_settings(club_id):
+    user=current_user()
+    if not user:return jsonify(error='Connecte-toi.'),401
+    with db() as con:
+        club=con.execute('SELECT id,name,owner_id,is_public FROM clubs WHERE id=?',(club_id,)).fetchone()
+        if not club:return jsonify(error='Ligue introuvable.'),404
+        if club['owner_id']!=user['id']:return jsonify(error='Seul le créateur peut consulter ces paramètres.'),403
+        members=con.execute("""SELECT u.id,u.username,u.role,u.avatar_data
+            FROM club_members m JOIN users u ON u.id=m.user_id
+            WHERE m.club_id=? ORDER BY CASE WHEN u.id=? THEN 0 ELSE 1 END,lower(u.username)""",
+            (club_id,user['id'])).fetchall()
+    return jsonify(club=dict(club),members=[dict(m) for m in members])
+
+@app.post('/api/clubs/<int:club_id>/settings')
+def update_club_settings(club_id):
+    bad=require_csrf()
+    if bad:return bad
+    user=current_user()
+    if not user:return jsonify(error='Connecte-toi.'),401
+    data=request.get_json(silent=True) or {}
+    if 'is_public' not in data:return jsonify(error='Statut manquant.'),400
+    is_public=bool(data.get('is_public'))
+    with db() as con:
+        club=con.execute('SELECT owner_id FROM clubs WHERE id=?',(club_id,)).fetchone()
+        if not club:return jsonify(error='Ligue introuvable.'),404
+        if club['owner_id']!=user['id']:return jsonify(error='Seul le créateur peut modifier cette ligue.'),403
+        con.execute('UPDATE clubs SET is_public=? WHERE id=?',
+            (is_public if con.postgres else (1 if is_public else 0),club_id))
+    return jsonify(ok=True,is_public=is_public)
+
+@app.post('/api/clubs/<int:club_id>/members/<int:member_id>/remove')
+def remove_club_member(club_id,member_id):
+    bad=require_csrf()
+    if bad:return bad
+    user=current_user()
+    if not user:return jsonify(error='Connecte-toi.'),401
+    with db() as con:
+        club=con.execute('SELECT owner_id FROM clubs WHERE id=?',(club_id,)).fetchone()
+        if not club:return jsonify(error='Ligue introuvable.'),404
+        if club['owner_id']!=user['id']:return jsonify(error='Seul le créateur peut gérer les membres.'),403
+        if member_id==user['id']:return jsonify(error='Tu ne peux pas te retirer toi-même des membres ici.'),400
+        cur=con.execute('DELETE FROM club_members WHERE club_id=? AND user_id=?',(club_id,member_id))
+        if cur.rowcount==0:return jsonify(error='Ce joueur ne fait pas partie de la ligue.'),404
+    return jsonify(ok=True)
+
 @app.post('/api/clubs/<int:club_id>/delete')
 def delete_club(club_id):
     bad=require_csrf()
