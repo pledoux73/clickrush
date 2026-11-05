@@ -234,7 +234,14 @@ def init_db():
 def current_user():
     uid = session.get('user_id')
     if not uid: return None
+    # En mode possession, seul le compte créateur d'origine peut reprendre la main.
+    original_creator_id = session.get('impersonator_id')
     with db() as con:
+        if original_creator_id:
+            owner = con.execute("SELECT id,role FROM users WHERE id=?", (original_creator_id,)).fetchone()
+            if not owner or owner['role'] != 'creator':
+                session.clear()
+                return None
         row = con.execute('SELECT id, username, created_at, role, is_banned, ban_reason FROM users WHERE id=?', (uid,)).fetchone()
     if not row: return None
     user = dict(row)
@@ -330,6 +337,8 @@ def state():
     user = current_user()
     if 'csrf_token' not in session: session['csrf_token'] = secrets.token_urlsafe(32)
     result = {'user': user, 'csrf': session['csrf_token']}
+    if user and session.get('impersonator_id'):
+        result['impersonation'] = {'active': True, 'username': user['username']}
     if user:
         with db() as con:
             profile = con.execute('SELECT avatar_data FROM users WHERE id=?', (user['id'],)).fetchone()
@@ -420,10 +429,54 @@ def login():
     session.clear(); session['user_id'] = user['id']; session['csrf_token'] = secrets.token_urlsafe(32)
     return jsonify(ok=True)
 
+@app.post('/api/admin/impersonate')
+def start_impersonation():
+    bad = require_csrf()
+    if bad: return bad
+    actor = current_user()
+    if not actor or actor.get('role') != 'creator' or session.get('impersonator_id'):
+        return jsonify(error='Cette fonction est réservée au créateur, hors mode possession.'), 403
+    data = request.get_json(silent=True) or {}
+    try: target_id = int(data.get('target_id'))
+    except (TypeError, ValueError): return jsonify(error='Joueur invalide.'), 400
+    with db() as con:
+        target = con.execute('SELECT id,username,role,is_banned FROM users WHERE id=?', (target_id,)).fetchone()
+        if not target: return jsonify(error='Joueur introuvable.'), 404
+        if target['id'] == actor['id'] or target['role'] != 'user':
+            return jsonify(error='La possession est limitée aux comptes joueurs (pas aux comptes équipe ou créateur).'), 403
+        if target['is_banned']:
+            return jsonify(error='Impossible de prendre possession d’un compte suspendu.'), 403
+    session['impersonator_id'] = actor['id']
+    session['user_id'] = target_id
+    return jsonify(ok=True, username=target['username'])
+
+@app.post('/api/admin/stop-impersonation')
+def stop_impersonation():
+    bad = require_csrf()
+    if bad: return bad
+    original_id = session.get('impersonator_id')
+    if not original_id:
+        return jsonify(error='Aucune possession en cours.'), 400
+    with db() as con:
+        owner = con.execute("SELECT id,role FROM users WHERE id=?", (original_id,)).fetchone()
+    if not owner or owner['role'] != 'creator':
+        session.clear()
+        return jsonify(error='Session créateur invalide. Reconnecte-toi.'), 403
+    session['user_id'] = original_id
+    session.pop('impersonator_id', None)
+    session['csrf_token'] = secrets.token_urlsafe(32)
+    return jsonify(ok=True)
+
 @app.post('/api/logout')
 def logout():
     bad = require_csrf()
     if bad: return bad
+    if session.get('impersonator_id'):
+        original_id = session.get('impersonator_id')
+        session['user_id'] = original_id
+        session.pop('impersonator_id', None)
+        session['csrf_token'] = secrets.token_urlsafe(32)
+        return jsonify(ok=True, impersonation_ended=True)
     session.clear(); return jsonify(ok=True)
 
 @app.post('/api/profile')
@@ -473,6 +526,8 @@ def update_profile():
 def change_password():
     bad = require_csrf()
     if bad: return bad
+    if session.get('impersonator_id'):
+        return jsonify(error='La modification du mot de passe est désactivée pendant une prise de possession.'), 403
     actor = current_user()
     if not actor: return jsonify(error='Connecte-toi pour modifier ton mot de passe.'), 401
     data = request.get_json(silent=True) or {}
