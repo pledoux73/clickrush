@@ -79,6 +79,7 @@ def init_db():
                 auto_status TEXT NOT NULL DEFAULT 'clear', auto_reason TEXT NOT NULL DEFAULT '', click_pattern TEXT NOT NULL DEFAULT '', auto_processed INTEGER NOT NULL DEFAULT 0)''')
         if con.postgres:
             con.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data TEXT')
+            con.execute('ALTER TABLE clubs ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT TRUE')
             con.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS auto_status TEXT NOT NULL DEFAULT 'clear'")
             con.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS auto_reason TEXT NOT NULL DEFAULT ''")
             con.execute("ALTER TABLE scores ADD COLUMN IF NOT EXISTS click_pattern TEXT NOT NULL DEFAULT ''")
@@ -184,6 +185,9 @@ def init_db():
         con.execute('CREATE INDEX IF NOT EXISTS idx_dm_pair ON direct_messages(sender_id,recipient_id,created_at)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id,conversation_id)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_group_messages ON group_messages(conversation_id,created_at)')
+        if not con.postgres:
+            club_columns = [row['name'] for row in con.execute('PRAGMA table_info(clubs)').fetchall()]
+            if 'is_public' not in club_columns: con.execute('ALTER TABLE clubs ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1')
         con.execute('CREATE INDEX IF NOT EXISTS idx_club_messages ON club_messages(club_id,created_at)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_dm_recipient_pair ON direct_messages(recipient_id,sender_id,created_at)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_scores_duration_cps ON scores(duration,cps DESC,user_id)')
@@ -614,13 +618,13 @@ def social_state():
         outgoing = con.execute("""SELECT u.username FROM friend_requests r
             JOIN users u ON u.id=r.recipient_id WHERE r.sender_id=? AND r.status='pending'
             ORDER BY r.created_at DESC""", (uid,)).fetchall()
-        clubs = con.execute("""SELECT c.id,c.name,c.owner_id,
+        clubs = con.execute("""SELECT c.id,c.name,c.owner_id,c.is_public,
             (SELECT COUNT(*) FROM club_members m WHERE m.club_id=c.id) AS members
             FROM clubs c JOIN club_members mine ON mine.club_id=c.id
             WHERE mine.user_id=? ORDER BY lower(c.name)""", (uid,)).fetchall()
-        discover = con.execute("""SELECT c.id,c.name,c.owner_id,
+        discover = con.execute("""SELECT c.id,c.name,c.owner_id,c.is_public,
             (SELECT COUNT(*) FROM club_members m WHERE m.club_id=c.id) AS members
-            FROM clubs c WHERE NOT EXISTS
+            FROM clubs c WHERE c.is_public=TRUE AND NOT EXISTS
             (SELECT 1 FROM club_members mine WHERE mine.club_id=c.id AND mine.user_id=?)
             ORDER BY c.created_at DESC LIMIT 30""", (uid,)).fetchall()
     return jsonify(friends=[dict(r) for r in friends], incoming=[dict(r) for r in incoming],
@@ -800,14 +804,15 @@ def create_club():
     if not user:return jsonify(error='Connecte-toi.'),401
     data=request.get_json(silent=True) or {}
     name=str(data.get('name','')).strip()
+    is_public=bool(data.get('is_public',True))
     if not re.fullmatch(r'[A-Za-z0-9 _-]{3,24}',name):return jsonify(error='Le nom doit faire 3 à 24 caractères (lettres, chiffres, espaces, _ ou -).'),400
     try:
         with db() as con:
             if con.postgres:
-                row=con.execute('INSERT INTO clubs(name,owner_id,created_at) VALUES(?,?,?) RETURNING id',(name,user['id'],int(time.time()))).fetchone()
+                row=con.execute('INSERT INTO clubs(name,owner_id,created_at,is_public) VALUES(?,?,?,?) RETURNING id',(name,user['id'],int(time.time()),is_public)).fetchone()
                 cid=row['id']
             else:
-                cur=con.execute('INSERT INTO clubs(name,owner_id,created_at) VALUES(?,?,?)',(name,user['id'],int(time.time())))
+                cur=con.execute('INSERT INTO clubs(name,owner_id,created_at,is_public) VALUES(?,?,?,?)',(name,user['id'],int(time.time()),1 if is_public else 0))
                 cid=cur.lastrowid
             con.execute('INSERT INTO club_members(club_id,user_id,joined_at) VALUES(?,?,?)',(cid,user['id'],int(time.time())))
     except Exception as exc:
@@ -825,9 +830,41 @@ def join_club():
     try:cid=int(data.get('club_id'))
     except (TypeError,ValueError):return jsonify(error='Club invalide.'),400
     with db() as con:
-        exists=con.execute('SELECT id FROM clubs WHERE id=?',(cid,)).fetchone()
+        exists=con.execute('SELECT id,is_public FROM clubs WHERE id=?',(cid,)).fetchone()
         if not exists:return jsonify(error='Club introuvable.'),404
+        if not exists['is_public']:return jsonify(error='Ce club est privé : demande une invitation à son créateur.'),403
         con.execute('INSERT INTO club_members(club_id,user_id,joined_at) VALUES(?,?,?) ON CONFLICT DO NOTHING',(cid,user['id'],int(time.time())))
+    return jsonify(ok=True)
+
+@app.post('/api/clubs/<int:club_id>/delete')
+def delete_club(club_id):
+    bad=require_csrf()
+    if bad:return bad
+    user=current_user()
+    if not user:return jsonify(error='Connecte-toi.'),401
+    with db() as con:
+        club=con.execute('SELECT owner_id FROM clubs WHERE id=?',(club_id,)).fetchone()
+        if not club:return jsonify(error='Club introuvable.'),404
+        if club['owner_id']!=user['id']:return jsonify(error='Seul le créateur du club peut le supprimer.'),403
+        con.execute('DELETE FROM clubs WHERE id=?',(club_id,))
+    return jsonify(ok=True)
+
+@app.post('/api/clubs/<int:club_id>/invite')
+def invite_to_club(club_id):
+    bad=require_csrf()
+    if bad:return bad
+    user=current_user()
+    if not user:return jsonify(error='Connecte-toi.'),401
+    data=request.get_json(silent=True) or {}
+    name=str(data.get('username','')).strip()
+    if not re.fullmatch(r'[A-Za-z0-9_]{3,18}',name):return jsonify(error='Pseudo invalide.'),400
+    with db() as con:
+        club=con.execute('SELECT owner_id FROM clubs WHERE id=?',(club_id,)).fetchone()
+        if not club:return jsonify(error='Club introuvable.'),404
+        if club['owner_id']!=user['id']:return jsonify(error='Seul le créateur peut inviter des joueurs.'),403
+        target=con.execute('SELECT id FROM users WHERE lower(username)=lower(?)',(name,)).fetchone()
+        if not target:return jsonify(error='Joueur introuvable.'),404
+        con.execute('INSERT INTO club_members(club_id,user_id,joined_at) VALUES(?,?,?) ON CONFLICT DO NOTHING',(club_id,target['id'],int(time.time())))
     return jsonify(ok=True)
 
 @app.post('/api/clubs/leave')
