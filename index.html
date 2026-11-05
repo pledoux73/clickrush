@@ -200,7 +200,7 @@ function renderAdminUsers(){
   if(user.role==='creator'&&u.role!=='creator'){
    actions+='<select aria-label="Rôle de '+escapeHtml(u.username)+'" onchange="setAdminRole('+u.id+',this.value)"><option value="user" '+(u.role==='user'?'selected':'')+'>Joueur</option><option value="mod" '+(u.role==='mod'?'selected':'')+'>Modo</option><option value="admin" '+(u.role==='admin'?'selected':'')+'>Admin</option></select>';
   }
-  if(user.role==='creator'&&u.role==='user'&&!u.is_banned){
+  if(user.role==='creator'&&['user','mod','admin'].includes(u.role)&&!u.is_banned){
    actions+='<button class="secondary" onclick="startImpersonation('+u.id+',\''+escapeHtml(u.username)+'\')">Prendre possession</button>';
   }
   return '<div class="social-item"><span class="admin-person">'+avatarHtml(u.avatar_data,u.username)+'<span><b>'+escapeHtml(u.username)+'</b><br><small class="social-small">'+u.role.toUpperCase()+(u.is_banned?' · BANNI':'')+'</small></span></span><span>'+actions+'</span></div>';
