@@ -347,6 +347,6 @@ async function loadBoard(force=false){try{const cached=boardCache.get(boardDurat
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function avatarHtml(src,name,cls='mini-avatar'){const label=String(name||'?').trim().charAt(0).toUpperCase()||'?';return src?'<img class="'+cls+'" src="'+escapeHtml(src)+'" alt="Photo de '+escapeHtml(name||'joueur')+'">':'<span class="'+cls+'" aria-label="Avatar">'+escapeHtml(label)+'</span>'}
 function messageHtml(m){const mine=Number(m.sender_id)===Number(user&&user.id);return '<div class="message-line '+(mine?'mine':'')+'">'+avatarHtml(m.avatar_data,m.username)+'<div class="message-bubble"><div class="message-meta">'+escapeHtml(m.username)+' · '+new Date(m.created_at*1000).toLocaleString()+'</div><div>'+escapeHtml(m.body)+'</div></div></div>'}
-setInterval(()=>{if(document.hidden)return;if(activeMessageType)loadActiveMessages();if(activeClubId)loadClubMessages()},1500);
+setInterval(()=>{if(document.hidden)return;if(activeMessageType&&!$('messagesPage').classList.contains('hidden'))loadActiveMessages();if(activeClubId&&!$('clubsPage').classList.contains('hidden'))loadClubMessages()},5000);
 showPage("home");init();
 </script></body></html>
