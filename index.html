@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="fr">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0b1020"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/clickrush-icon.svg" type="image/svg+xml">
 <title>ClickRush — Test de vitesse de clic</title>
 <style>
 :root{--bg:#0b1020;--panel:#121a30;--panel2:#18233e;--text:#edf2ff;--muted:#9aa8c7;--line:#293653;--accent:#7c5cff;--cyan:#39d6d0;--good:#4ade80;--danger:#fb7185}
@@ -24,7 +24,8 @@
 @keyframes introCard{to{opacity:1;transform:translateY(0) scale(1)}}@keyframes introReveal{to{opacity:1;transform:translateY(0)}}@keyframes introAvatar{to{opacity:1;transform:scale(1) rotate(0)}}@keyframes introSweep{to{transform:translateX(8%) translateY(-5%)}}@keyframes introParticles{0%{opacity:0;transform:scale(.7)}35%{opacity:.6}100%{opacity:0;transform:scale(1.2)}}@keyframes introLine{to{width:72%}}
 @media(prefers-reduced-motion:reduce){#creatorIntro,.intro-card,.intro-kicker,.intro-avatar-wrap,.intro-name,.intro-role,.intro-line,#creatorIntro:before,#creatorIntro:after{animation-duration:.01ms!important;animation-delay:0ms!important}}
 </style></head>
-<body><div id="creatorIntro" role="presentation" onclick="dismissCreatorIntro()"><div class="intro-card"><button class="intro-skip" onclick="event.stopPropagation();dismissCreatorIntro()">PASSER ✕</button><div class="intro-kicker">CLICKRUSH PRESENTS</div><div class="intro-brand">CLICK<span>RUSH</span> ⚡</div><div class="intro-avatar-wrap"><div id="introAvatar">P</div></div><div class="intro-name"><span id="introUsername">pledoux73</span><span class="verified-badge" aria-label="Administrateur vérifié" title="Administrateur vérifié">✓</span></div><div class="intro-role">Administrateur vérifié · Fondateur</div><div class="intro-line"></div></div></div><div class="wrap">
+<body>
+<div id="pwaInstallBar" class="hidden" style="position:fixed;z-index:99990;left:12px;right:12px;bottom:12px;max-width:520px;margin:auto;padding:12px 14px;border:1px solid #39d6d0;border-radius:16px;background:#121a30;box-shadow:0 12px 35px #0009;align-items:center;justify-content:space-between;gap:10px"><span style="font-weight:750">Installer ClickRush sur ce téléphone</span><span style="display:flex;gap:7px"><button id="pwaInstallButton" type="button">Installer</button><button id="pwaInstallDismiss" class="ghost" type="button" aria-label="Fermer">✕</button></span></div><div id="creatorIntro" role="presentation" onclick="dismissCreatorIntro()"><div class="intro-card"><button class="intro-skip" onclick="event.stopPropagation();dismissCreatorIntro()">PASSER ✕</button><div class="intro-kicker">CLICKRUSH PRESENTS</div><div class="intro-brand">CLICK<span>RUSH</span> ⚡</div><div class="intro-avatar-wrap"><div id="introAvatar">P</div></div><div class="intro-name"><span id="introUsername">pledoux73</span><span class="verified-badge" aria-label="Administrateur vérifié" title="Administrateur vérifié">✓</span></div><div class="intro-role">Administrateur vérifié · Fondateur</div><div class="intro-line"></div></div></div><div class="wrap">
 <header class="top"><div class="brand">CLICK<span>RUSH</span> ⚡</div><nav class="userbar page-nav"><button data-page="home" onclick="showPage('home')">Jeu</button><button data-page="profile" onclick="showPage('profile')">Profil</button><button data-page="board" onclick="showPage('board')">🏆 Classement mondial</button><button data-page="friends" onclick="showPage('friends')">Amis</button><button data-page="messages" onclick="showPage('messages')">Messages<span id="messagesUnreadBadge" class="nav-count" aria-label="Messages non lus"></span></button><button data-page="clubs" onclick="showPage('clubs')">Ligues<span id="clubsUnreadBadge" class="nav-count" aria-label="Messages de ligues non lus"></span></button><button id="registerBtn" onclick="showAuth('register')">Créer un compte</button><button id="authBtn" class="secondary" onclick="showAuth('login')">Connexion</button><button id="logoutBtn" class="ghost hidden" onclick="logout()">Déconnexion</button></nav></header><div id="impersonationBanner" class="hidden" style="position:sticky;top:0;z-index:20;background:#7c2d12;color:white;padding:12px 16px;border-radius:12px;margin:10px 0;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><b id="impersonationLabel">⚠ Mode possession</b><button type="button" onclick="stopImpersonation()" style="background:#fff;color:#7c2d12">Quitter la possession</button></div>
 <section id="homePage"><section class="hero"><div class="eyebrow">ENTRAÎNE TES RÉFLEXES</div><h1>À quelle vitesse peux-tu cliquer ?</h1><p>Teste ton CPS, bats ton record et grimpe dans le classement.</p></section>
 <div class="grid"><main class="panel"><h2>🎯 Test de clic</h2><div class="durations" id="durations"><button data-time="5">5 sec</button><button data-time="10" class="active">10 sec</button><button data-time="15">15 sec</button><button data-time="30">30 sec</button><button data-time="60">60 sec</button></div>
@@ -375,4 +376,32 @@ function messageHtml(m){const mine=Number(m.sender_id)===Number(user&&user.id);r
 setInterval(()=>{if(document.hidden)return;if(activeMessageType&&!$('messagesPage').classList.contains('hidden'))loadActiveMessages();if(activeClubId&&!$('clubsPage').classList.contains('hidden'))loadClubMessages()},5000);
 showPage("home");init();
 setInterval(()=>{if(!document.hidden)refreshUnreadBadges()},5000);
+
+let clickrushInstallPrompt=null;
+const pwaInstallBar=document.getElementById('pwaInstallBar');
+const pwaInstallButton=document.getElementById('pwaInstallButton');
+const pwaInstallDismiss=document.getElementById('pwaInstallDismiss');
+window.addEventListener('beforeinstallprompt',event=>{
+  event.preventDefault();
+  clickrushInstallPrompt=event;
+  if(pwaInstallBar)pwaInstallBar.classList.remove('hidden');
+  if(pwaInstallBar)pwaInstallBar.style.display='flex';
+});
+if(pwaInstallButton)pwaInstallButton.addEventListener('click',async()=>{
+  if(!clickrushInstallPrompt)return;
+  clickrushInstallPrompt.prompt();
+  await clickrushInstallPrompt.userChoice;
+  clickrushInstallPrompt=null;
+  if(pwaInstallBar)pwaInstallBar.classList.add('hidden');
+});
+if(pwaInstallDismiss)pwaInstallDismiss.addEventListener('click',()=>{
+  if(pwaInstallBar)pwaInstallBar.classList.add('hidden');
+});
+window.addEventListener('appinstalled',()=>{
+  if(pwaInstallBar)pwaInstallBar.classList.add('hidden');
+});
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('/service-worker.js').catch(err=>console.warn('Service worker ClickRush:',err)));
+}
+
 </script></body></html>
