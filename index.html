@@ -81,7 +81,7 @@ async function refreshSocial(){
   if(d.discover.length)d.discover.forEach(x=>{cl+="<div class='social-item'><span>"+escapeHtml(x.name)+" <small class='social-small'>("+x.members+")</small></span><button onclick='joinClub("+x.id+")'>Rejoindre</button></div>"});
   else cl+="<span class='social-small'>Aucune ligue à découvrir.</span>";
   cl+="</div></aside><main class='discord-main'><div class='discord-title'>"+(activeClubId?"# "+escapeHtml(activeClubName):"Sélectionne une ligue")+"</div>";
-  if(activeClubId){const selected=d.clubs.find(x=>Number(x.id)===Number(activeClubId));cl+="<div id='clubMessages' class='discord-chat'>Chargement…</div><div class='discord-compose'><input id='clubInput' maxlength='1000' placeholder='Message à la ligue…' onkeydown='if(event.key===\"Enter\")sendClubMessage()'><button onclick='sendClubMessage()'>Envoyer</button><button class='secondary' onclick='sendClubScore()'>🏆 Partager mon score</button></div>"+(selected&&Number(selected.owner_id)===Number(user.id)?"<div class='social-form'><input id='clubInviteName' maxlength='18' placeholder='Pseudo à inviter'><button onclick='inviteClubMember()'>Inviter</button><button class='ghost' onclick='deleteClub("+activeClubId+")'>Supprimer la ligue</button></div>":"");}
+  if(activeClubId){const selected=d.clubs.find(x=>Number(x.id)===Number(activeClubId));cl+="<div id='clubMessages' class='discord-chat'>Chargement…</div><div class='discord-compose'><input id='clubInput' maxlength='1000' placeholder='Message à la ligue…' onkeydown='if(event.key===\"Enter\")sendClubMessage()'><button onclick='sendClubMessage()'>Envoyer</button><button class='secondary' onclick='sendClubScore()'>🏆 Partager mon score</button></div>"+(selected&&Number(selected.owner_id)===Number(user.id)?"<div class='social-form'><button class='secondary' onclick='openClubSettings("+activeClubId+")'>⚙ Paramètres de la ligue</button></div>":"");}
   else cl+="<div class='discord-chat'><div class='empty'>Choisis une ligue dans la liste pour afficher sa discussion.</div></div>";
   cl+="</main></div>";
   if(friendsBox)friendsBox.innerHTML=f;if(clubsBox)clubsBox.innerHTML=cl;
@@ -133,6 +133,25 @@ async function inviteClubMember(){const username=$('clubInviteName').value.trim(
 async function joinClub(id){try{await api("/api/clubs/join",{method:"POST",body:JSON.stringify({club_id:id})});$("gameNotice").textContent="Tu as rejoint le club !";refreshSocial()}catch(e){$("gameNotice").textContent=e.message}}
 async function leaveClub(id){if(!confirm("Quitter ce club ?"))return;try{await api("/api/clubs/leave",{method:"POST",body:JSON.stringify({club_id:id})});if(activeClubId===id)activeClubId=null;refreshSocial()}catch(e){$("gameNotice").textContent=e.message}}
 async function openClub(id,name){activeClubId=id;activeClubName=name;activeFriendId=null;refreshSocial()}
+async function openClubSettings(id){
+ if(Number(id)!==Number(activeClubId))return;
+ const main=document.querySelector('.discord-main');if(!main)return;
+ main.innerHTML="<div class='discord-title'>⚙ Paramètres de la ligue</div><div class='discord-chat'>Chargement des paramètres…</div>";
+ try{
+  const d=await api("/api/clubs/"+id+"/settings");
+  const c=d.club;
+  let members=d.members.map(m=>"<div class='social-item'><span class='social-person'>"+avatarHtml(m.avatar_data,m.username)+"<span><b>"+escapeHtml(m.username)+"</b><br><small class='social-small'>"+(Number(m.id)===Number(c.owner_id)?"Créateur":escapeHtml(m.role||"Joueur"))+"</small></span></span>"+(Number(m.id)===Number(c.owner_id)?"<span class='social-small'>Propriétaire</span>":"<button class='ghost' onclick='removeClubMember("+id+","+m.id+")'>Retirer</button>")+"</div>").join("");
+  main.innerHTML="<div class='discord-title'>⚙ Paramètres · "+escapeHtml(c.name)+"</div><div class='discord-chat'><div class='social-block'><b>Visibilité de la ligue</b><p class='social-small'>Une ligue publique apparaît dans Découvrir. Une ligue privée est accessible uniquement aux membres invités.</p><select id='clubSettingsVisibility'><option value='public' "+(c.is_public?"selected":"")+">Publique</option><option value='private' "+(!c.is_public?"selected":"")+">Privée · sur invitation</option></select> <button onclick='saveClubVisibility("+id+")'>Enregistrer</button></div><div class='social-block'><b>Inviter un joueur</b><div class='social-form'><input id='clubInviteName' maxlength='18' placeholder='Pseudo du joueur'><button onclick='inviteClubMember()'>Inviter</button></div></div><div class='social-block'><b>Membres ("+d.members.length+")</b><div class='social-list'>"+(members||"<span class='social-small'>Aucun membre.</span>")+"</div></div><div class='social-block'><b>Zone de danger</b><button class='ghost' onclick='deleteClub("+id+")'>Supprimer définitivement la ligue</button></div></div><div class='social-form'><button class='secondary' onclick='refreshSocial()'>← Retour à la discussion</button></div>";
+ }catch(e){main.innerHTML="<div class='discord-title'>Paramètres de la ligue</div><div class='discord-chat'>"+escapeHtml(e.message)+"</div><button class='secondary' onclick='refreshSocial()'>Retour</button>"}
+}
+async function saveClubVisibility(id){
+ const value=$("clubSettingsVisibility").value==="public";
+ try{await api("/api/clubs/"+id+"/settings",{method:"POST",body:JSON.stringify({is_public:value})});alert("Visibilité mise à jour.");refreshSocial()}catch(e){alert(e.message)}
+}
+async function removeClubMember(clubId,memberId){
+ if(!confirm("Retirer ce joueur de la ligue ? Il ne pourra plus lire ni envoyer de messages."))return;
+ try{await api("/api/clubs/"+clubId+"/members/"+memberId+"/remove",{method:"POST",body:JSON.stringify({})});openClubSettings(clubId)}catch(e){alert(e.message)}
+}
 async function loadClubMessages(){if(clubLoading||document.hidden||!activeClubId)return;clubLoading=true;try{const d=await api("/api/clubs/"+activeClubId+"/messages");const el=$("clubMessages");if(!el)return;el.innerHTML=d.messages.map(m=>messageHtml({...m,sender_id:m.user_id})).join("")||"<span class='social-small'>Aucun message dans ce club.</span>";el.scrollTop=el.scrollHeight}catch(e){if($("clubMessages"))$("clubMessages").textContent=e.message}finally{clubLoading=false}}
 async function sendClubMessage(){const input=$("clubInput"),body=input.value.trim();if(!body)return;try{await api("/api/clubs/"+activeClubId+"/messages",{method:"POST",body:JSON.stringify({body})});input.value="";loadClubMessages()}catch(e){$("gameNotice").textContent=e.message}}
 
