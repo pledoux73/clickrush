@@ -674,24 +674,31 @@ def social_user_row(row):
 @app.get('/api/unread-counts')
 def unread_counts():
     user=current_user()
-    if not user:return jsonify(messages=0,clubs=0)
+    if not user:return jsonify(messages=0,clubs=0,dm={},groups={},club_items={})
     uid=user['id']
     with db() as con:
-        dm=con.execute("""SELECT COUNT(*) AS n FROM direct_messages m
+        dm_rows=con.execute("""SELECT m.sender_id AS id,COUNT(*) AS n FROM direct_messages m
             WHERE m.recipient_id=? AND m.sender_id<>? AND m.created_at>COALESCE(
                 (SELECT r.last_read_at FROM message_read_state r
-                 WHERE r.user_id=? AND r.scope='dm' AND r.conversation_id=m.sender_id),0)""",(uid,uid,uid)).fetchone()
-        groups=con.execute("""SELECT COUNT(*) AS n FROM group_messages m
+                 WHERE r.user_id=? AND r.scope='dm' AND r.conversation_id=m.sender_id),0)
+            GROUP BY m.sender_id""",(uid,uid,uid)).fetchall()
+        group_rows=con.execute("""SELECT m.conversation_id AS id,COUNT(*) AS n FROM group_messages m
             JOIN group_members gm ON gm.conversation_id=m.conversation_id AND gm.user_id=?
             WHERE m.sender_id<>? AND m.created_at>COALESCE(
                 (SELECT r.last_read_at FROM message_read_state r
-                 WHERE r.user_id=? AND r.scope='group' AND r.conversation_id=m.conversation_id),0)""",(uid,uid,uid)).fetchone()
-        clubs=con.execute("""SELECT COUNT(*) AS n FROM club_messages m
+                 WHERE r.user_id=? AND r.scope='group' AND r.conversation_id=m.conversation_id),0)
+            GROUP BY m.conversation_id""",(uid,uid,uid)).fetchall()
+        club_rows=con.execute("""SELECT m.club_id AS id,COUNT(*) AS n FROM club_messages m
             JOIN club_members cm ON cm.club_id=m.club_id AND cm.user_id=?
             WHERE m.user_id<>? AND m.created_at>COALESCE(
                 (SELECT r.last_read_at FROM message_read_state r
-                 WHERE r.user_id=? AND r.scope='club' AND r.conversation_id=m.club_id),0)""",(uid,uid,uid)).fetchone()
-    return jsonify(messages=int(dm['n'] or 0)+int(groups['n'] or 0),clubs=int(clubs['n'] or 0))
+                 WHERE r.user_id=? AND r.scope='club' AND r.conversation_id=m.club_id),0)
+            GROUP BY m.club_id""",(uid,uid,uid)).fetchall()
+    dm_counts={str(r['id']):int(r['n']) for r in dm_rows}
+    group_counts={str(r['id']):int(r['n']) for r in group_rows}
+    club_counts={str(r['id']):int(r['n']) for r in club_rows}
+    return jsonify(messages=sum(dm_counts.values())+sum(group_counts.values()),
+        clubs=sum(club_counts.values()),dm=dm_counts,groups=group_counts,club_items=club_counts)
 
 
 @app.get('/api/social')
