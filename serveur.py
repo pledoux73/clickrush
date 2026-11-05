@@ -442,8 +442,8 @@ def start_impersonation():
     with db() as con:
         target = con.execute('SELECT id,username,role,is_banned FROM users WHERE id=?', (target_id,)).fetchone()
         if not target: return jsonify(error='Joueur introuvable.'), 404
-        if target['id'] == actor['id'] or target['role'] != 'user':
-            return jsonify(error='La possession est limitée aux comptes joueurs (pas aux comptes équipe ou créateur).'), 403
+        if target['id'] == actor['id'] or target['role'] not in ('user', 'mod', 'admin'):
+            return jsonify(error='La possession est réservée aux comptes joueurs, modos et admins.'), 403
         if target['is_banned']:
             return jsonify(error='Impossible de prendre possession d’un compte suspendu.'), 403
     session['impersonator_id'] = actor['id']
