@@ -111,6 +111,7 @@ def init_db():
                 reason TEXT NOT NULL, created_at INTEGER NOT NULL)''')
         con.execute('CREATE INDEX IF NOT EXISTS idx_scores_cps ON scores(cps DESC)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_scores_user ON scores(user_id, created_at DESC)')
+        con.execute('CREATE INDEX IF NOT EXISTS idx_scores_auto_created ON scores(auto_processed, created_at DESC)')
         if con.postgres:
             con.execute("""CREATE TABLE IF NOT EXISTS friendships (
                 user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
