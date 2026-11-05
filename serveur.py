@@ -87,6 +87,10 @@ def init_db():
             con.execute('''CREATE TABLE IF NOT EXISTS player_notifications (
                 id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 body TEXT NOT NULL, created_at BIGINT NOT NULL, seen BOOLEAN NOT NULL DEFAULT FALSE)''')
+            con.execute('''CREATE TABLE IF NOT EXISTS player_reports (
+                id BIGSERIAL PRIMARY KEY, reporter_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                target_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                reason TEXT NOT NULL, created_at BIGINT NOT NULL)''')
         else:
             columns = [row['name'] for row in con.execute('PRAGMA table_info(users)').fetchall()]
             if 'avatar_data' not in columns:
@@ -100,6 +104,10 @@ def init_db():
             con.execute('''CREATE TABLE IF NOT EXISTS player_notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 body TEXT NOT NULL, created_at INTEGER NOT NULL, seen INTEGER NOT NULL DEFAULT 0)''')
+            con.execute('''CREATE TABLE IF NOT EXISTS player_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                target_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                reason TEXT NOT NULL, created_at INTEGER NOT NULL)''')
         con.execute('CREATE INDEX IF NOT EXISTS idx_scores_cps ON scores(cps DESC)')
         con.execute('CREATE INDEX IF NOT EXISTS idx_scores_user ON scores(user_id, created_at DESC)')
         if con.postgres:
@@ -455,6 +463,58 @@ def update_profile():
         if 'unique' in str(exc).lower() or 'duplicate' in str(exc).lower():
             return jsonify(error='Ce pseudo est déjà utilisé.'), 409
         raise
+    return jsonify(ok=True)
+
+@app.post('/api/profile/password')
+def change_password():
+    bad = require_csrf()
+    if bad: return bad
+    actor = current_user()
+    if not actor: return jsonify(error='Connecte-toi pour modifier ton mot de passe.'), 401
+    data = request.get_json(silent=True) or {}
+    current_password = str(data.get('current_password', ''))
+    new_password = str(data.get('new_password', ''))
+    if len(new_password) < 8 or len(new_password) > 128:
+        return jsonify(error='Le nouveau mot de passe doit contenir entre 8 et 128 caractères.'), 400
+    with db() as con:
+        row = con.execute('SELECT password_hash FROM users WHERE id=?', (actor['id'],)).fetchone()
+        if not row or not check_password_hash(row['password_hash'], current_password):
+            return jsonify(error='Mot de passe actuel incorrect.'), 403
+        con.execute('UPDATE users SET password_hash=? WHERE id=?',
+            (generate_password_hash(new_password), actor['id']))
+    return jsonify(ok=True)
+
+@app.post('/api/reports')
+def create_player_report():
+    bad = require_csrf()
+    if bad: return bad
+    reporter = current_user()
+    if not reporter: return jsonify(error='Connecte-toi pour signaler un joueur.'), 401
+    data = request.get_json(silent=True) or {}
+    target_name = str(data.get('username', '')).strip()
+    reason = str(data.get('reason', '')).strip()
+    if not re.fullmatch(r'[A-Za-z0-9_]{3,18}', target_name):
+        return jsonify(error='Indique un pseudo valide.'), 400
+    if len(reason) < 8 or len(reason) > 500:
+        return jsonify(error='Explique le motif en 8 à 500 caractères.'), 400
+    now = int(time.time())
+    with db() as con:
+        target = con.execute('SELECT id,username,role FROM users WHERE lower(username)=lower(?)', (target_name,)).fetchone()
+        if not target: return jsonify(error='Joueur introuvable.'), 404
+        if int(target['id']) == int(reporter['id']):
+            return jsonify(error='Tu ne peux pas te signaler toi-même.'), 400
+        if target['role'] == 'creator':
+            return jsonify(error='Le compte créateur ne peut pas être signalé.'), 403
+        recent = con.execute('SELECT id FROM player_reports WHERE reporter_id=? AND target_id=? AND created_at>? LIMIT 1',
+            (reporter['id'], target['id'], now - 86400)).fetchone()
+        if recent:
+            return jsonify(error='Tu as déjà signalé ce joueur au cours des dernières 24 heures.'), 429
+        con.execute('INSERT INTO player_reports(reporter_id,target_id,reason,created_at) VALUES(?,?,?,?)',
+            (reporter['id'], target['id'], reason, now))
+        creators = con.execute("SELECT id FROM users WHERE role='creator'").fetchall()
+        for creator in creators:
+            con.execute('INSERT INTO player_notifications(user_id,body,created_at) VALUES(?,?,?)',
+                (creator['id'], '🚩 Signalement de '+reporter['username']+' contre '+target['username']+' : '+reason, now))
     return jsonify(ok=True)
 
 def add_anti_cheat_strike(con, user_id, reason):
