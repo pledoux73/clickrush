@@ -136,7 +136,7 @@ async function openClub(id,name){clubSettingsOpen=false;activeClubId=id;activeCl
 async function openClubSettings(id){
  if(Number(id)!==Number(activeClubId))return;
  clubSettingsOpen=true;
- const main=document.querySelector('.discord-main');if(!main)return;
+ const main=document.querySelector('#clubsPanel .discord-main');if(!main)return;
  main.innerHTML="<div class='discord-title'>⚙ Paramètres de la ligue</div><div class='discord-chat'>Chargement des paramètres…</div>";
  try{
   const d=await api("/api/clubs/"+id+"/settings");
